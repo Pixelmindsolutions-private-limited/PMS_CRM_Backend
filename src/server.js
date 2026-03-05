@@ -19,7 +19,7 @@ const staffRoutes = require('./routes/staff.routes');
 // const attendanceRoutes = require('./routes/attendance.routes');
 // const invoiceRoutes = require('./routes/invoice.routes');
 // const payslipRoutes = require('./routes/payslip.routes');
-// const dashboardRoutes = require('./routes/dashboard.routes');
+const dashboardRoutes = require('./routes/dashboard.routes');
 
 const app = express();
 
@@ -42,7 +42,7 @@ mongoose.connect(process.env.MONGODB_URI)
 
 // Routes
 app.use('/api/auth', authRoutes);
-// app.use('/api', dashboardRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/staff', staffRoutes);
 // app.use('/api/tasks', taskRoutes);
