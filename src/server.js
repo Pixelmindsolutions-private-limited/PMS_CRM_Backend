@@ -16,7 +16,7 @@ const authRoutes = require('./routes/auth.routes');
 const projectRoutes = require('./routes/project.routes');
 const staffRoutes = require('./routes/staff.routes');
 // const taskRoutes = require('./routes/task.routes');
-// const attendanceRoutes = require('./routes/attendance.routes');
+const attendanceRoutes = require('./routes/attendance.routes');
 // const invoiceRoutes = require('./routes/invoice.routes');
 // const payslipRoutes = require('./routes/payslip.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
@@ -46,7 +46,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/staff', staffRoutes);
 // app.use('/api/tasks', taskRoutes);
-// app.use('/api/attendance', attendanceRoutes);
+app.use('/api/attendance', attendanceRoutes);
 // app.use('/api/invoices', invoiceRoutes);
 // app.use('/api/payslips', payslipRoutes);
 
