@@ -16,7 +16,7 @@ exports.getStaffOptions = async (req, res) => {
     const options = staff.map(s => ({
       id: s._id,
       staffId: s.staffId,
-      staffName: s.staffName,
+      staffName: s.name,
       role: s.role
     }));
 
