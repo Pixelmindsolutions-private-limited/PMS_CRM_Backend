@@ -13,7 +13,7 @@ dotenv.config();
 
 // Import routes
 const authRoutes = require('./routes/auth.routes');
-// const projectRoutes = require('./routes/project.routes');
+const projectRoutes = require('./routes/project.routes');
 const staffRoutes = require('./routes/staff.routes');
 // const taskRoutes = require('./routes/task.routes');
 // const attendanceRoutes = require('./routes/attendance.routes');
@@ -43,7 +43,7 @@ mongoose.connect(process.env.MONGODB_URI)
 // Routes
 app.use('/api/auth', authRoutes);
 // app.use('/api', dashboardRoutes);
-// app.use('/api/projects', projectRoutes);
+app.use('/api/projects', projectRoutes);
 app.use('/api/staff', staffRoutes);
 // app.use('/api/tasks', taskRoutes);
 // app.use('/api/attendance', attendanceRoutes);

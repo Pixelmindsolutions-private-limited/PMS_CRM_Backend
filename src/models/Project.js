@@ -1,11 +1,15 @@
 const mongoose = require('mongoose');
 
+// Milestone Payment Schema
 const milestonePaymentSchema = new mongoose.Schema({
   amount: {
     type: Number,
     required: true
   },
-  description: String,
+  description: {
+    type: String,
+    required: true
+  },
   paymentMode: {
     type: String,
     enum: ['Cash', 'Bank Transfer', 'UPI', 'Cheque'],
@@ -17,49 +21,110 @@ const milestonePaymentSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-const teamMemberSchema = new mongoose.Schema({
-  role: String,
-  members: [String]
+// Timeline Schema (for App/Website)
+const timelineSchema = new mongoose.Schema({
+  designing: String,
+  frontend: String,
+  backend: String,
+  deployment: String
 });
 
+// Marketing Item Schema
+const marketingItemSchema = new mongoose.Schema({
+  enabled: {
+    type: Boolean,
+    default: false
+  },
+  duration: String,
+  quantity: Number,
+  startDate: Date
+});
+
+// Marketing Services Schema
+const marketingServicesSchema = new mongoose.Schema({
+  reels: {
+    type: marketingItemSchema,
+    default: () => ({})
+  },
+  posters: {
+    type: marketingItemSchema,
+    default: () => ({})
+  },
+  seo: {
+    type: Boolean,
+    default: false
+  },
+  keywords: {
+    type: Boolean,
+    default: false
+  },
+  banners: {
+    type: Boolean,
+    default: false
+  }
+});
+
+// Budget Installment Schema
+const budgetInstallmentSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: true
+  },
+  amount: {
+    type: Number,
+    required: true
+  },
+  deadline: Date
+});
+
+// Main Project Schema
 const projectSchema = new mongoose.Schema({
-  projectid: {
+  // Basic Information
+  projectId: {
     type: String,
     required: true,
     unique: true
   },
-  projectname: {
+  projectName: {
     type: String,
     required: true
   },
-  clientname: {
+  clientName: {
     type: String,
     required: true
   },
-  mobilenumber: {
+  clientMobile: {
     type: String,
     required: true
   },
-  email: {
+  clientEmail: {
     type: String,
     required: true
   },
   clientAddress: String,
-  selectcategory: {
+  
+  // Category and Status
+  category: {
     type: String,
-    enum: ['website', 'mobile app', 'digital market', 'software', 'consulting'],
+    enum: ['website', 'mobile app', 'digital market', 'software'],
     default: 'website'
   },
-  startDate: Date,
-  projectHandoverDate: Date,
-  deadlineDate: Date,
-  projectCost: Number,
-  milestone: Number,
   status: {
     type: String,
-    enum: ['active', 'on hold', 'completed', 'cancelled'],
+    enum: ['active', 'completed', 'on hold', 'cancelled'],
     default: 'active'
   },
+
+  // Dates
+  startDate: Date,
+  handoverDate: Date,
+  deadlineDate: Date,
+
+  // Financial
+  projectCost: Number,
+  milestone: Number,
+
+  // Team Members
   teamMembers: {
     frontend: [String],
     backend: [String],
@@ -67,38 +132,50 @@ const projectSchema = new mongoose.Schema({
     tester: [String],
     manager: [String]
   },
+
+  // Payments
   milestonePayments: [milestonePaymentSchema],
-  uploadfile: String,
-  quotationfile: String,
-  
-  // For App/Website projects
+  budgetInstallments: [budgetInstallmentSchema],
+
+  // Files
+  uploadFile: String,
+  quotationFile: String,
+
+  // App/Website Specific
   appId: String,
   appName: String,
-  timeline: {
-    designing: String,
-    frontend: String,
-    backend: String,
-    deployment: String
+  timeline: timelineSchema,
+
+  // Digital Marketing Specific
+  marketing: marketingServicesSchema,
+
+  // Metadata
+  createdAt: {
+    type: Date,
+    default: Date.now
   },
-  
-  // For Digital Marketing
-  marketing: {
-    reels: {
-      enabled: Boolean,
-      duration: String,
-      quantity: Number,
-      startDate: Date
-    },
-    posters: {
-      enabled: Boolean,
-      duration: String,
-      quantity: Number,
-      startDate: Date
-    },
-    seo: Boolean,
-    keywords: Boolean,
-    banners: Boolean
+  updatedAt: {
+    type: Date,
+    default: Date.now
   }
-}, { timestamps: true });
+}, {
+  timestamps: true
+});
+
+// Generate project ID before saving if not provided
+projectSchema.pre('save', async function(next) {
+  if (!this.projectId) {
+    const count = await mongoose.model('Project').countDocuments();
+    const year = new Date().getFullYear().toString().slice(-2);
+    this.projectId = `PRJ${year}${String(count + 1).padStart(4, '0')}`;
+  }
+  next();
+});
+
+// Update timestamps on save
+projectSchema.pre('save', function(next) {
+  this.updatedAt = new Date();
+  next();
+});
 
 module.exports = mongoose.model('Project', projectSchema);
