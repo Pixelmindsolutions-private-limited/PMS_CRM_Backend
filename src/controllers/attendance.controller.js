@@ -10,15 +10,28 @@ exports.getStaffOptions = async (req, res) => {
     console.log('👥 Fetching staff options for attendance...');
 
     const staff = await Staff.find({ isActive: true })
-      .select('staffId staffName role')
+      .select('employeeId employeeName role')
       .sort({ staffName: 1 });
 
-    const options = staff.map(s => ({
-      id: s._id,
-      staffId: s.staffId,
-      staffName: s.name,
-      role: s.role
-    }));
+    const options = staff.map(s => {
+      // Log each staff to debug
+      console.log('Processing staff:', {
+        id: s._id,
+        staffId: s.employeeId,
+        employeeId: s.employeeId,
+        staffName: s.employeeName,
+        role: s.role
+      });
+
+      return {
+        id: s._id,
+        staffId: s.staffId || s.employeeId || '', // Use staffId or employeeId as fallback
+        staffName: s.employeeName || '', // This is the correct field name
+        role: s.role || ''
+      };
+    });
+
+    console.log("jjjjjjjjjjjjjjjjjjjjjjjjj",options)
 
     res.json({
       success: true,
