@@ -20,6 +20,8 @@ const attendanceRoutes = require('./routes/attendance.routes');
 // const invoiceRoutes = require('./routes/invoice.routes');
 // const payslipRoutes = require('./routes/payslip.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
+const fingerprintRoutes = require('./routes/fingerprint.routes');
+
 
 const app = express();
 
@@ -47,6 +49,8 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/worksheets', worksheetRoutes);
 app.use('/api/attendance', attendanceRoutes);
+app.use('/api/fingerprint', fingerprintRoutes);
+
 // app.use('/api/invoices', invoiceRoutes);
 // app.use('/api/payslips', payslipRoutes);
 
