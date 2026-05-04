@@ -69,7 +69,7 @@ const autoEndBreakAndCheckActivity = async (employeeId) => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const session = await WorkSession.findOne({ employeeId, date: today, status: 'on_break' });
     if (!session) return;
-
+    
     const breakInfo = activeBreaks.get(employeeId);
     const now = new Date();
     const lastActiveTime = session.lastActiveTime || session.startTime;
