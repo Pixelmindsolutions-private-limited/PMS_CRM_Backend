@@ -133,6 +133,7 @@ mongoose.connect(MONGODB_URI)
     process.exit(1);
   });
 
+
 // ==================== MIDDLEWARE ====================
 
 // Security
@@ -151,7 +152,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(morgan('dev'));
 
 // ✅ Static files - with debug logging
-const uploadsPath = path.join(__dirname, '..', 'uploads');
+const uploadsPath = path.join(__dirname, 'uploads');
 console.log('📁 Uploads directory:', uploadsPath);
 console.log('📁 Uploads exists:', fs.existsSync(uploadsPath));
 
