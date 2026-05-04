@@ -18,7 +18,14 @@ const createUploadDirs = () => {
 
 createUploadDirs();
 
-// Configure storage
+// Ensure directory exists (helper function)
+const ensureDir = (dir) => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+};
+
+// ==================== FINGERPRINT STORAGE ====================
 const fingerprintStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/fingerprints/');
@@ -50,7 +57,7 @@ const fingerprintFileFilter = (req, file, cb) => {
   }
 };
 
-// Export configured upload middleware
+// Fingerprint upload middleware
 const uploadFingerprint = multer({
   storage: fingerprintStorage,
   fileFilter: fingerprintFileFilter,
@@ -59,8 +66,63 @@ const uploadFingerprint = multer({
   }
 });
 
+// ==================== DOCUMENT STORAGE ====================
+const documentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const { employeeId } = req.params;
+    const uploadDir = `uploads/staff/documents/${employeeId}`;
+    ensureDir(uploadDir);
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const cleanName = file.originalname.replace(/\s/g, '_');
+    cb(null, `${timestamp}_${cleanName}`);
+  }
+});
+
+// File filter for documents
+const documentFileFilter = (req, file, cb) => {
+  const allowedTypes = [
+    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  ];
+  
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type'), false);
+  }
+};
+
+// Document upload middleware
+const uploadDocuments = multer({
+  storage: documentStorage,
+  fileFilter: documentFileFilter,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB max
+    files: 10 // Max 10 files at once
+  }
+});
+// After all your code, BEFORE module.exports
+console.log('✅ upload.config loaded');
+console.log('📁 uploadArray type:', typeof uploadDocuments.array('documents', 10));
+// ==================== EXPORT ALL ====================
+// ✅ SINGLE module.exports with all configurations
 module.exports = {
+  // Document upload (for staff documents)
+  uploadDocuments,
+  uploadSingle: uploadDocuments.single('profileImage'),
+  uploadArray: uploadDocuments.array('documents', 10),
+  uploadFields: uploadDocuments.fields([
+    { name: 'profileImage', maxCount: 1 },
+    { name: 'documents', maxCount: 5 }
+  ]),
+  
+  // Fingerprint upload
   uploadFingerprint,
-  uploadSingle: uploadFingerprint.single('fingerprintImage'),
-  uploadMultiple: uploadFingerprint.array('fingerprintImages', 6)
+  uploadFingerprintSingle: uploadFingerprint.single('fingerprintImage'),
+  uploadFingerprintMultiple: uploadFingerprint.array('fingerprintImages', 6)
 };
