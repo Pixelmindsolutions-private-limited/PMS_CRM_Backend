@@ -8,14 +8,12 @@ const BASE_URL = process.env.BASE_URL || "http://31.97.206.144:5000";
 
 // ==================== HELPER FUNCTIONS ====================
 
-// Ensure directory exists
 const ensureDirectoryExists = (dirPath) => {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
   }
 };
 
-// Get file type from extension
 const getFileType = (fileName) => {
   const extension = path.extname(fileName).toLowerCase();
   const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
@@ -28,7 +26,6 @@ const getFileType = (fileName) => {
   return 'other';
 };
 
-// Generate Batch ID
 const generateBatchId = (employeeId) => {
   const date = new Date();
   const year = date.getFullYear();
@@ -42,14 +39,8 @@ const generateBatchId = (employeeId) => {
 
 // ==================== STAFF CRUD OPERATIONS ====================
 
-// @desc    Create new staff
-// @route   POST /api/staff/create
 const createStaff = async (req, res) => {
   try {
-    console.log('📝 Creating new staff');
-    console.log('req.body:', req.body);
-    console.log('req.files:', req.files ? Object.keys(req.files) : 'no files');
-    
     const {
       employeeId,
       employeeName,
@@ -66,8 +57,7 @@ const createStaff = async (req, res) => {
     if (!employeeId) {
       return res.status(400).json({
         success: false,
-        message: "Employee ID is required",
-        receivedBody: req.body
+        message: "Employee ID is required. Please provide a valid Employee ID."
       });
     }
     
@@ -183,14 +173,10 @@ const createStaff = async (req, res) => {
           uploadedAt: new Date()
         });
       }
-      
-      console.log(`✅ Uploaded ${documents.length} document(s)`);
     }
 
     const staffResponse = staff.toObject();
     delete staffResponse.password;
-
-    console.log('✅ Staff created successfully:', staff.employeeId);
 
     res.status(201).json({
       success: true,
@@ -216,14 +202,11 @@ const createStaff = async (req, res) => {
   }
 };
 
-// @desc    Get all staff members
-// @route   GET /api/staff/all
 const getAllStaff = async (req, res) => {
   try {
     const { page = 1, limit = 10, search, role, status } = req.query;
     const query = {};
 
-    // Search functionality
     if (search) {
       query.$or = [
         { employeeName: { $regex: search, $options: 'i' } },
@@ -233,12 +216,10 @@ const getAllStaff = async (req, res) => {
       ];
     }
 
-    // Filter by role
     if (role) {
       query.role = role;
     }
 
-    // Filter by status
     if (status) {
       query.isActive = status === 'active';
     }
@@ -270,8 +251,6 @@ const getAllStaff = async (req, res) => {
   }
 };
 
-// @desc    Get staff options for dropdown
-// @route   GET /api/staff/options
 const getStaffOptions = async (req, res) => {
   try {
     const staff = await Staff.find({ isActive: true })
@@ -298,8 +277,6 @@ const getStaffOptions = async (req, res) => {
   }
 };
 
-// @desc    Get staff by Employee ID
-// @route   GET /api/staff/:employeeId
 const getStaffByEmployeeId = async (req, res) => {
   try {
     const { employeeId } = req.params;
@@ -327,12 +304,10 @@ const getStaffByEmployeeId = async (req, res) => {
   }
 };
 
-// @desc    Update staff
-// @route   PUT /api/staff/:employeeId
 const updateStaff = async (req, res) => {
   try {
     const { employeeId } = req.params;
-    const updateData = req.body;
+    const updateData = { ...req.body };
 
     const staff = await Staff.findOne({ employeeId });
     if (!staff) {
@@ -342,25 +317,51 @@ const updateStaff = async (req, res) => {
       });
     }
 
-    // Handle password update
-    if (updateData.password) {
+    if (updateData.password && updateData.password.trim()) {
       const salt = await bcrypt.genSalt(10);
       updateData.password = await bcrypt.hash(updateData.password, salt);
+    } else {
+      delete updateData.password;
     }
 
-    // Handle profile image update
-    if (req.files && req.files.profileImage) {
+    if (req.files && req.files.profileImage && req.files.profileImage[0]) {
+      const profileFile = req.files.profileImage[0];
       const uploadDir = path.join(__dirname, '../uploads/staff/profile');
       ensureDirectoryExists(uploadDir);
       
-      const imageFile = req.files.profileImage;
-      const fileName = `${Date.now()}_${imageFile.name.replace(/\s/g, '_')}`;
-      const uploadPath = path.join(uploadDir, fileName);
-      await imageFile.mv(uploadPath);
+      if (staff.profileImage) {
+        const oldImagePath = staff.profileImage.replace(BASE_URL, path.join(__dirname, '..'));
+        if (fs.existsSync(oldImagePath)) {
+          fs.unlinkSync(oldImagePath);
+        }
+      }
+      
+      const fileName = `${employeeId}_profile_${Date.now()}${path.extname(profileFile.originalname)}`;
+      const finalPath = path.join(uploadDir, fileName);
+      
+      fs.renameSync(profileFile.path, finalPath);
       updateData.profileImage = `${BASE_URL}/uploads/staff/profile/${fileName}`;
     }
 
-    // Parse JSON fields
+    if (req.files && req.files.idCardImage && req.files.idCardImage[0]) {
+      const idFile = req.files.idCardImage[0];
+      const uploadDir = path.join(__dirname, '../uploads/staff/idcards');
+      ensureDirectoryExists(uploadDir);
+      
+      if (staff.idCardImage) {
+        const oldImagePath = staff.idCardImage.replace(BASE_URL, path.join(__dirname, '..'));
+        if (fs.existsSync(oldImagePath)) {
+          fs.unlinkSync(oldImagePath);
+        }
+      }
+      
+      const fileName = `${employeeId}_idcard_${Date.now()}${path.extname(idFile.originalname)}`;
+      const finalPath = path.join(uploadDir, fileName);
+      
+      fs.renameSync(idFile.path, finalPath);
+      updateData.idCardImage = `${BASE_URL}/uploads/staff/idcards/${fileName}`;
+    }
+
     if (updateData.address && typeof updateData.address === 'string') {
       updateData.address = JSON.parse(updateData.address);
     }
@@ -398,8 +399,6 @@ const updateStaff = async (req, res) => {
   }
 };
 
-// @desc    Delete staff
-// @route   DELETE /api/staff/:employeeId
 const deleteStaff = async (req, res) => {
   try {
     const { employeeId } = req.params;
@@ -413,7 +412,6 @@ const deleteStaff = async (req, res) => {
       });
     }
 
-    // Delete all documents of this staff
     const documents = await StaffDocument.find({ employeeId });
     for (const doc of documents) {
       const filePath = doc.filePath.replace(BASE_URL, path.join(__dirname, '..'));
@@ -423,7 +421,6 @@ const deleteStaff = async (req, res) => {
     }
     await StaffDocument.deleteMany({ employeeId });
 
-    // Delete staff folders
     const staffDocDir = path.join(__dirname, '../uploads/staff/documents', employeeId);
     if (fs.existsSync(staffDocDir)) {
       fs.rmSync(staffDocDir, { recursive: true, force: true });
@@ -443,8 +440,6 @@ const deleteStaff = async (req, res) => {
   }
 };
 
-// @desc    Toggle staff status
-// @route   PATCH /api/staff/:employeeId/toggle-status
 const toggleStaffStatus = async (req, res) => {
   try {
     const { employeeId } = req.params;
@@ -481,19 +476,12 @@ const toggleStaffStatus = async (req, res) => {
 };
 
 // ==================== DOCUMENT OPERATIONS ====================
-// In staff.controller.js - uploadDocuments function
+
 const uploadDocuments = async (req, res) => {
   try {
     const { employeeId } = req.params;
     const { descriptions } = req.body;
 
-    console.log(`📄 Uploading documents for staff: ${employeeId}`);
-    
-    // ✅ Multer puts files in req.files (array)
-    console.log('📁 req.files:', req.files);
-    console.log('📝 req.body:', req.body);
-
-    // Check if files exist
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
         success: false,
@@ -501,7 +489,6 @@ const uploadDocuments = async (req, res) => {
       });
     }
 
-    // Find staff
     const staff = await Staff.findOne({ employeeId });
     if (!staff) {
       return res.status(404).json({
@@ -516,11 +503,10 @@ const uploadDocuments = async (req, res) => {
     const batchId = generateBatchId(employeeId);
     const uploadedDocuments = [];
 
-    // ✅ Multer file object uses: originalname, filename, size, mimetype
     for (let i = 0; i < req.files.length; i++) {
       const file = req.files[i];
       
-      const originalName = file.originalname;  // ← Multer uses 'originalname'
+      const originalName = file.originalname;
       const fileExtension = path.extname(originalName);
       const fileType = getFileType(originalName);
       const documentName = originalName.replace(fileExtension, '').replace(/[_-]/g, ' ');
@@ -530,7 +516,7 @@ const uploadDocuments = async (req, res) => {
         employeeName: staff.employeeName,
         documentName: documentName,
         fileName: originalName,
-        filePath: `${BASE_URL}/uploads/staff/documents/${employeeId}/${file.filename}`, // ← Multer uses 'filename'
+        filePath: `${BASE_URL}/uploads/staff/documents/${employeeId}/${file.filename}`,
         fileType: fileType,
         fileSize: file.size,
         mimeType: file.mimetype,
@@ -542,8 +528,6 @@ const uploadDocuments = async (req, res) => {
       const document = await StaffDocument.create(documentData);
       uploadedDocuments.push(document);
     }
-
-    console.log(`✅ Uploaded ${uploadedDocuments.length} document(s)`);
 
     res.status(200).json({
       success: true,
@@ -558,13 +542,37 @@ const uploadDocuments = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Upload error:', error);
+    console.error('Upload error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Get ALL documents for an employee
-// @route   GET /api/staff/documents/employee/:employeeId
+const getMetadata = async (req, res) => {
+  try {
+    const roles = [
+      "Admin", "Manager", "Staff", "Full Stack Developer", 
+      "Teacher", "Accountant", "Librarian", "Other"
+    ];
+    
+    const bloodGroups = [
+      "A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-", "Unknown"
+    ];
+    
+    res.status(200).json({
+      success: true,
+      roles: roles,
+      bloodGroups: bloodGroups
+    });
+    
+  } catch (error) {
+    console.error('Error fetching metadata:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch metadata'
+    });
+  }
+};
+
 const getDocumentsByEmployeeId = async (req, res) => {
   try {
     const { employeeId } = req.params;
@@ -584,8 +592,6 @@ const getDocumentsByEmployeeId = async (req, res) => {
   }
 };
 
-// @desc    Get documents by batch ID
-// @route   GET /api/staff/documents/batch/:batchId
 const getDocumentsByBatchId = async (req, res) => {
   try {
     const { batchId } = req.params;
@@ -606,14 +612,11 @@ const getDocumentsByBatchId = async (req, res) => {
   }
 };
 
-// @desc    Get documents by type, description, document name, or file name
-// @route   GET /api/staff/documents/type/:searchTerm
 const getDocumentsByType = async (req, res) => {
   try {
     const { searchTerm } = req.params;
     const { employeeId } = req.query;
     
-    // ✅ Validate searchTerm is a string
     if (!searchTerm || typeof searchTerm !== 'string') {
       return res.status(400).json({
         success: false,
@@ -621,20 +624,17 @@ const getDocumentsByType = async (req, res) => {
       });
     }
     
-    // Clean the search term
     const cleanTerm = searchTerm.trim();
     
-    // Build query - NOW searches ALL 4 fields
     let query = {
       $or: [
         { fileType: { $regex: cleanTerm, $options: 'i' } },
         { description: { $regex: cleanTerm, $options: 'i' } },
         { documentName: { $regex: cleanTerm, $options: 'i' } },
-        { fileName: { $regex: cleanTerm, $options: 'i' } }  // ✅ ADDED
+        { fileName: { $regex: cleanTerm, $options: 'i' } }
       ]
     };
     
-    // Add employee filter if provided
     if (employeeId && typeof employeeId === 'string') {
       query.employeeId = employeeId;
     }
@@ -655,9 +655,6 @@ const getDocumentsByType = async (req, res) => {
   }
 };
 
-
-// @desc    Get documents by date range
-// @route   GET /api/staff/documents/date-range
 const getDocumentsByDateRange = async (req, res) => {
   try {
     const { start, end, employeeId } = req.query;
@@ -689,10 +686,6 @@ const getDocumentsByDateRange = async (req, res) => {
   }
 };
 
-
-
-// @desc    Get document statistics
-// @route   GET /api/staff/documents/stats/:employeeId
 const getDocumentStats = async (req, res) => {
   try {
     const { employeeId } = req.params;
@@ -732,8 +725,6 @@ const getDocumentStats = async (req, res) => {
   }
 };
 
-// @desc    Delete a single document
-// @route   DELETE /api/staff/documents/:documentId
 const deleteDocument = async (req, res) => {
   try {
     const { documentId } = req.params;
@@ -747,7 +738,6 @@ const deleteDocument = async (req, res) => {
       });
     }
     
-    // Delete physical file
     const filePath = document.filePath.replace(BASE_URL, path.join(__dirname, '..'));
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
@@ -764,8 +754,6 @@ const deleteDocument = async (req, res) => {
   }
 };
 
-// @desc    Delete all documents of an employee
-// @route   DELETE /api/staff/documents/employee/:employeeId
 const deleteAllEmployeeDocuments = async (req, res) => {
   try {
     const { employeeId } = req.params;
@@ -792,8 +780,6 @@ const deleteAllEmployeeDocuments = async (req, res) => {
   }
 };
 
-// @desc    Delete a batch of documents
-// @route   DELETE /api/staff/documents/batch/:batchId
 const deleteBatch = async (req, res) => {
   try {
     const { batchId } = req.params;
@@ -819,13 +805,9 @@ const deleteBatch = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-// For upload.single('profileImage')
+
 const uploadSingle = async (req, res) => {
   try {
-    // req.file contains the uploaded file
-    console.log('File:', req.file);
-    console.log('Body:', req.body);
-    
     res.json({
       success: true,
       file: req.file,
@@ -836,13 +818,8 @@ const uploadSingle = async (req, res) => {
   }
 };
 
-// For upload.array('documents', 10)
 const uploadMultiple = async (req, res) => {
   try {
-    // req.files is an array
-    console.log('Files:', req.files);
-    console.log('Body:', req.body);
-    
     res.json({
       success: true,
       count: req.files.length,
@@ -854,12 +831,8 @@ const uploadMultiple = async (req, res) => {
   }
 };
 
-// For upload.fields([...])
 const uploadMixed = async (req, res) => {
   try {
-    console.log('Profile:', req.files.profileImage?.[0]);
-    console.log('Documents:', req.files.documents);
-    
     res.json({
       success: true,
       profile: req.files.profileImage?.[0],
@@ -870,7 +843,6 @@ const uploadMixed = async (req, res) => {
   }
 };
 
-// Export all functions
 module.exports = {
   createStaff,
   getAllStaff,
@@ -880,6 +852,7 @@ module.exports = {
   deleteStaff,
   toggleStaffStatus,
   uploadDocuments,
+  getMetadata,
   getDocumentsByEmployeeId,
   getDocumentsByBatchId,
   getDocumentsByType,

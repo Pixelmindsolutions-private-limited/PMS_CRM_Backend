@@ -122,7 +122,7 @@ staffDocumentSchema.pre('save', async function(next) {
 
 // Main Staff Schema
 const staffSchema = new mongoose.Schema({
-  employeeId: { type: String, unique: true, sparse: true },
+  employeeId: { type: String, unique: true, required: true, trim: true },
   employeeName: { type: String, required: true, trim: true },
   role: { type: String, required: true, enum: ['Admin', 'Manager', 'Staff', 'Full Stack Developer', 'Teacher', 'Accountant', 'Librarian', 'Other'], default: 'Staff' },
   mobile: { type: String, required: true, match: [/^[0-9]{10}$/], unique: true },
@@ -148,23 +148,7 @@ const staffSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-// Generate Employee ID before saving
-staffSchema.pre('save', async function(next) {
-  if (!this.employeeId) {
-    try {
-      const Staff = mongoose.model('Staff');
-      const count = await Staff.countDocuments();
-      const year = new Date().getFullYear().toString().slice(-2);
-      const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
-      const sequence = String(count + 1).padStart(4, '0');
-      this.employeeId = `EMP${year}${month}${sequence}`;
-    } catch (error) {
-      const fallback = Date.now().toString();
-      this.employeeId = `EMP${fallback}`;
-    }
-  }
-  next();
-});
+
 
 // Create models
 const Staff = mongoose.models.Staff || mongoose.model('Staff', staffSchema);
