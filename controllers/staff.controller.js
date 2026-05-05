@@ -1,306 +1,3 @@
-// import  express from 'express';
-
-// const Staff = require('../models/Staff');
-// const bcrypt = require('bcryptjs');
-
-// // @desc    Create new staff
-// // @route   POST /api/staff
-// // @access  Private
-// exports.createStaff = async (req, res) => {
-//   try {
-//     console.log('📝 Creating new staff:', req.body.employeeName);
-    
-//     // Hash password
-//     const salt = await bcrypt.genSalt(10);
-//     const hashedPassword = await bcrypt.hash(req.body.password || 'Staff@123', salt);
-
-//     // Prepare staff data matching Flutter model
-//     const staffData = {
-//       employeeId: req.body.employeeId,
-//       employeeName: req.body.employeeName,
-//       role: req.body.role,
-//       mobile: req.body.mobile,
-//       email: req.body.email,
-//       joiningDate: req.body.joiningDate || new Date(),
-//       bloodGroup: req.body.bloodGroup || 'O+',
-//       password: hashedPassword,
-//       isActive: true,
-//       profileImage: req.body.profileImage || null,
-//       idCardImage: req.body.idCardImage || null,
-//       documents: req.body.documents || {}
-//     };
-
-//     // Create staff
-//     const staff = await Staff.create(staffData);
-
-//     // Remove password from response
-//     const staffResponse = staff.toObject();
-//     delete staffResponse.password;
-
-//     console.log('✅ Staff created successfully:', staff.employeeId);
-
-//     res.status(201).json({
-//       success: true,
-//       message: 'Staff created successfully',
-//       data: staffResponse
-//     });
-
-//   } catch (error) {
-//     console.error('❌ Create staff error:', error);
-
-//     // Handle duplicate key error
-//     if (error.code === 11000) {
-//       const field = Object.keys(error.keyPattern)[0];
-//       return res.status(400).json({
-//         success: false,
-//         message: `${field} already exists. Please use a different value.`
-//       });
-//     }
-
-//     // Handle validation errors
-//     if (error.name === 'ValidationError') {
-//       const errors = Object.values(error.errors).map(err => err.message);
-//       return res.status(400).json({
-//         success: false,
-//         message: 'Validation error',
-//         errors: errors
-//       });
-//     }
-
-//     res.status(500).json({
-//       success: false,
-//       message: error.message || 'Server error while creating staff'
-//     });
-//   }
-// };
-
-// // @desc    Get all staff (for dropdown/options)
-// // @route   GET /api/staff/options
-// // @access  Private
-// exports.getStaffOptions = async (req, res) => {
-//   try {
-//     const staff = await Staff.find({ isActive: true })
-//       .select('employeeId employeeName role')
-//       .sort({ employeeName: 1 });
-
-//     const options = staff.map(s => ({
-//       id: s._id,
-//       staffId: s.employeeId,
-//       staffName: s.employeeName,
-//       role: s.role
-//     }));
-
-//     res.json({
-//       success: true,
-//       data: options
-//     });
-//   } catch (error) {
-//     console.error('Get staff options error:', error);
-//     res.status(500).json({
-//       success: false,
-//       message: error.message
-//     });
-//   }
-// };
-
-// // @desc    Get all staff with pagination
-// // @route   GET /api/staff
-// // @access  Private
-// exports.getAllStaff = async (req, res) => {
-//   try {
-//     const { page = 1, limit = 10, search, role, status } = req.query;
-//     const query = {};
-
-//     // Search functionality
-//     if (search) {
-//       query.$or = [
-//         { employeeName: { $regex: search, $options: 'i' } },
-//         { email: { $regex: search, $options: 'i' } },
-//         { employeeId: { $regex: search, $options: 'i' } },
-//         { mobile: { $regex: search, $options: 'i' } }
-//       ];
-//     }
-
-//     // Filter by role
-//     if (role) {
-//       query.role = role;
-//     }
-
-//     // Filter by status
-//     if (status) {
-//       query.isActive = status === 'active';
-//     }
-
-//     const total = await Staff.countDocuments(query);
-//     const staff = await Staff.find(query)
-//       .select('-password')
-//       .limit(parseInt(limit))
-//       .skip((parseInt(page) - 1) * parseInt(limit))
-//       .sort({ createdAt: -1 });
-
-//     res.json({
-//       success: true,
-//       data: staff,
-//       pagination: {
-//         total,
-//         page: parseInt(page),
-//         limit: parseInt(limit),
-//         pages: Math.ceil(total / parseInt(limit))
-//       }
-//     });
-//   } catch (error) {
-//     console.error('Get all staff error:', error);
-//     res.status(500).json({
-//       success: false,
-//       message: error.message
-//     });
-//   }
-// };
-
-// // @desc    Get single staff by ID
-// // @route   GET /api/staff/:id
-// // @access  Private
-// exports.getStaffById = async (req, res) => {
-//   try {
-//     const staff = await Staff.findById(req.params.id).select('-password');
-    
-//     if (!staff) {
-//       return res.status(404).json({
-//         success: false,
-//         message: 'Staff member not found'
-//       });
-//     }
-
-//     res.json({
-//       success: true,
-//       data: staff
-//     });
-//   } catch (error) {
-//     console.error('Get staff by ID error:', error);
-    
-//     if (error.name === 'CastError') {
-//       return res.status(400).json({
-//         success: false,
-//         message: 'Invalid staff ID format'
-//       });
-//     }
-    
-//     res.status(500).json({
-//       success: false,
-//       message: error.message
-//     });
-//   }
-// };
-
-// // @desc    Update staff
-// // @route   PUT /api/staff/:id
-// // @access  Private
-// exports.updateStaff = async (req, res) => {
-//   try {
-//     // If password is being updated, hash it
-//     if (req.body.password) {
-//       const salt = await bcrypt.genSalt(10);
-//       req.body.password = await bcrypt.hash(req.body.password, salt);
-//     }
-
-//     const staff = await Staff.findByIdAndUpdate(
-//       req.params.id,
-//       req.body,
-//       { new: true, runValidators: true }
-//     ).select('-password');
-    
-//     if (!staff) {
-//       return res.status(404).json({
-//         success: false,
-//         message: 'Staff member not found'
-//       });
-//     }
-
-//     res.json({
-//       success: true,
-//       message: 'Staff updated successfully',
-//       data: staff
-//     });
-//   } catch (error) {
-//     console.error('Update staff error:', error);
-    
-//     if (error.code === 11000) {
-//       const field = Object.keys(error.keyPattern)[0];
-//       return res.status(400).json({
-//         success: false,
-//         message: `${field} already exists.`
-//       });
-//     }
-    
-//     res.status(500).json({
-//       success: false,
-//       message: error.message
-//     });
-//   }
-// };
-
-// // @desc    Delete staff
-// // @route   DELETE /api/staff/:id
-// // @access  Private
-// exports.deleteStaff = async (req, res) => {
-//   try {
-//     const staff = await Staff.findByIdAndDelete(req.params.id);
-    
-//     if (!staff) {
-//       return res.status(404).json({
-//         success: false,
-//         message: 'Staff member not found'
-//       });
-//     }
-
-//     res.json({
-//       success: true,
-//       message: 'Staff deleted successfully'
-//     });
-//   } catch (error) {
-//     console.error('Delete staff error:', error);
-//     res.status(500).json({
-//       success: false,
-//       message: error.message
-//     });
-//   }
-// };
-
-// // @desc    Toggle staff status
-// // @route   PATCH /api/staff/:id/toggle-status
-// // @access  Private
-// exports.toggleStatus = async (req, res) => {
-//   try {
-//     const staff = await Staff.findById(req.params.id);
-    
-//     if (!staff) {
-//       return res.status(404).json({
-//         success: false,
-//         message: 'Staff member not found'
-//       });
-//     }
-
-//     staff.isActive = !staff.isActive;
-//     staff.lastActive = staff.isActive ? new Date() : null;
-//     await staff.save();
-
-//     const updatedStaff = await Staff.findById(req.params.id).select('-password');
-
-//     res.json({
-//       success: true,
-//       message: `Staff ${updatedStaff.isActive ? 'activated' : 'deactivated'} successfully`,
-//       data: updatedStaff
-//     });
-//   } catch (error) {
-//     console.error('Toggle status error:', error);
-//     res.status(500).json({
-//       success: false,
-//       message: error.message
-//     });
-//   }
-// };
-
-
 const mongoose = require('mongoose');
 const { Staff, StaffDocument } = require('../Models/Staff.js');
 const bcrypt = require('bcryptjs');
@@ -349,9 +46,12 @@ const generateBatchId = (employeeId) => {
 // @route   POST /api/staff/create
 const createStaff = async (req, res) => {
   try {
-    console.log('📝 Creating new staff:', req.body.employeeName);
-
+    console.log('📝 Creating new staff');
+    console.log('req.body:', req.body);
+    console.log('req.files:', req.files ? Object.keys(req.files) : 'no files');
+    
     const {
+      employeeId,
       employeeName,
       role,
       mobile,
@@ -363,7 +63,14 @@ const createStaff = async (req, res) => {
       emergencyContact
     } = req.body;
 
-    // Validate required fields
+    if (!employeeId) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee ID is required",
+        receivedBody: req.body
+      });
+    }
+    
     if (!employeeName || !role || !mobile || !email || !password) {
       return res.status(400).json({
         success: false,
@@ -371,8 +78,15 @@ const createStaff = async (req, res) => {
       });
     }
 
-    // Check if staff already exists
-    const existingStaff = await Staff.findOne({ $or: [{ email }, { mobile }] });
+    let existingStaff = await Staff.findOne({ employeeId });
+    if (existingStaff) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee ID already exists"
+      });
+    }
+    
+    existingStaff = await Staff.findOne({ $or: [{ email }, { mobile }] });
     if (existingStaff) {
       return res.status(400).json({
         success: false,
@@ -380,37 +94,35 @@ const createStaff = async (req, res) => {
       });
     }
 
-    // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Handle profile image upload
     let profileImageUrl = null;
-    if (req.files && req.files.profileImage) {
-      const uploadDir = path.join(__dirname, '../uploads/staff/profile');
-      ensureDirectoryExists(uploadDir);
+    if (req.files && req.files.profileImage && req.files.profileImage[0]) {
+      const profileFile = req.files.profileImage[0];
+      const profileUploadDir = path.join(__dirname, '../uploads/staff/profile');
+      ensureDirectoryExists(profileUploadDir);
       
-      const imageFile = req.files.profileImage;
-      const fileName = `${Date.now()}_${imageFile.name.replace(/\s/g, '_')}`;
-      const uploadPath = path.join(uploadDir, fileName);
-      await imageFile.mv(uploadPath);
+      const fileName = `${employeeId}_profile_${Date.now()}${path.extname(profileFile.originalname)}`;
+      const finalPath = path.join(profileUploadDir, fileName);
+      
+      fs.renameSync(profileFile.path, finalPath);
       profileImageUrl = `${BASE_URL}/uploads/staff/profile/${fileName}`;
     }
 
-    // Handle ID card upload
     let idCardImageUrl = null;
-    if (req.files && req.files.idCardImage) {
-      const uploadDir = path.join(__dirname, '../uploads/staff/idcards');
-      ensureDirectoryExists(uploadDir);
+    if (req.files && req.files.idCardImage && req.files.idCardImage[0]) {
+      const idFile = req.files.idCardImage[0];
+      const idUploadDir = path.join(__dirname, '../uploads/staff/idcards');
+      ensureDirectoryExists(idUploadDir);
       
-      const imageFile = req.files.idCardImage;
-      const fileName = `${Date.now()}_${imageFile.name.replace(/\s/g, '_')}`;
-      const uploadPath = path.join(uploadDir, fileName);
-      await imageFile.mv(uploadPath);
+      const fileName = `${employeeId}_idcard_${Date.now()}${path.extname(idFile.originalname)}`;
+      const finalPath = path.join(idUploadDir, fileName);
+      
+      fs.renameSync(idFile.path, finalPath);
       idCardImageUrl = `${BASE_URL}/uploads/staff/idcards/${fileName}`;
     }
 
-    // Parse address if sent as JSON string
     let addressObj = {};
     if (address) {
       addressObj = typeof address === 'string' ? JSON.parse(address) : address;
@@ -418,10 +130,11 @@ const createStaff = async (req, res) => {
 
     let emergencyObj = {};
     if (emergencyContact) {
-      emergencyObj = typeof emergencyContact === 'string' ? JSON.parse(emergencyContact) : emergencyContact;
+      emergencyObj = typeof emergencyContact === 'string' ? JSON.parse(emergencyContact) : emergencyObj;
     }
 
     const staff = new Staff({
+      employeeId,
       employeeName,
       role,
       mobile,
@@ -437,7 +150,43 @@ const createStaff = async (req, res) => {
 
     await staff.save();
 
-    // Remove password from response
+    if (req.files && req.files.documents && req.files.documents.length > 0) {
+      const documents = req.files.documents;
+      const batchId = generateBatchId(employeeId);
+      const docDir = path.join(__dirname, '../uploads/staff/documents', employeeId);
+      ensureDirectoryExists(docDir);
+      
+      for (let i = 0; i < documents.length; i++) {
+        const file = documents[i];
+        const fileExtension = path.extname(file.originalname);
+        const fileType = getFileType(file.originalname);
+        const documentName = file.originalname.replace(fileExtension, '').replace(/[_-]/g, ' ');
+        const fileName = `${Date.now()}_${file.originalname.replace(/\s/g, '_')}`;
+        const finalPath = path.join(docDir, fileName);
+        
+        fs.renameSync(file.path, finalPath);
+        
+        const docTypeKey = `documentType_${i}`;
+        const docType = req.body[docTypeKey] || 'General';
+        
+        await StaffDocument.create({
+          employeeId: staff.employeeId,
+          employeeName: staff.employeeName,
+          documentName: documentName,
+          fileName: file.originalname,
+          filePath: `${BASE_URL}/uploads/staff/documents/${employeeId}/${fileName}`,
+          fileType: fileType,
+          fileSize: file.size,
+          mimeType: file.mimetype,
+          description: `Document type: ${docType}`,
+          batchId: batchId,
+          uploadedAt: new Date()
+        });
+      }
+      
+      console.log(`✅ Uploaded ${documents.length} document(s)`);
+    }
+
     const staffResponse = staff.toObject();
     delete staffResponse.password;
 

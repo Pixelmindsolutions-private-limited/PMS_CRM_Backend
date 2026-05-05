@@ -124,7 +124,7 @@ staffDocumentSchema.pre('save', async function(next) {
 const staffSchema = new mongoose.Schema({
   employeeId: { type: String, unique: true, sparse: true },
   employeeName: { type: String, required: true, trim: true },
-  role: { type: String, required: true, enum: ['Admin', 'Manager', 'Staff', 'Teacher', 'Accountant', 'Librarian', 'Other'], default: 'Staff' },
+  role: { type: String, required: true, enum: ['Admin', 'Manager', 'Staff', 'Full Stack Developer', 'Teacher', 'Accountant', 'Librarian', 'Other'], default: 'Staff' },
   mobile: { type: String, required: true, match: [/^[0-9]{10}$/], unique: true },
   email: { type: String, required: true, unique: true, lowercase: true },
   joiningDate: { type: Date, required: true, default: Date.now },

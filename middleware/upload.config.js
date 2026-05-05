@@ -6,7 +6,10 @@ const fs = require('fs');
 const createUploadDirs = () => {
   const dirs = [
     'uploads/fingerprints',
-    'uploads/temp'
+    'uploads/temp',
+    'uploads/staff/profile',     // ✅ Add this
+    'uploads/staff/idcards',      // ✅ Add this
+    'uploads/staff/documents'     // ✅ Add this
   ];
   
   dirs.forEach(dir => {
@@ -24,6 +27,60 @@ const ensureDir = (dir) => {
     fs.mkdirSync(dir, { recursive: true });
   }
 };
+
+// ==================== STAFF CREATION UPLOAD (NEW) ====================
+// This is for creating new staff where employeeId doesn't exist yet
+const staffCreationStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    // Store in temp directory first
+    let uploadPath = 'uploads/temp/';
+    
+    // Categorize based on field name
+    if (file.fieldname === 'profileImage') {
+      uploadPath = 'uploads/staff/profile/';
+    } else if (file.fieldname === 'idCardImage') {
+      uploadPath = 'uploads/staff/idcards/';
+    } else if (file.fieldname === 'documents') {
+      uploadPath = 'uploads/temp/'; // Temp storage until employeeId is known
+    }
+    
+    ensureDir(uploadPath);
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const random = Math.round(Math.random() * 1E9);
+    const cleanName = file.originalname.replace(/\s/g, '_');
+    // Use a temporary filename pattern
+    cb(null, `temp_${timestamp}_${random}_${cleanName}`);
+  }
+});
+
+// File filter for staff creation
+const staffCreationFileFilter = (req, file, cb) => {
+  const allowedTypes = [
+    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  ];
+  
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`Invalid file type: ${file.mimetype}. Only images and PDFs are allowed.`), false);
+  }
+};
+
+// Staff creation upload middleware (handles all files at once)
+const uploadStaffCreation = multer({
+  storage: staffCreationStorage,
+  fileFilter: staffCreationFileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB per file
+    files: 25 // Max 25 files total
+  }
+});
 
 // ==================== FINGERPRINT STORAGE ====================
 const fingerprintStorage = multer.diskStorage({
@@ -106,13 +163,18 @@ const uploadDocuments = multer({
     files: 10 // Max 10 files at once
   }
 });
-// After all your code, BEFORE module.exports
-console.log('✅ upload.config loaded');
-console.log('📁 uploadArray type:', typeof uploadDocuments.array('documents', 10));
+
 // ==================== EXPORT ALL ====================
-// ✅ SINGLE module.exports with all configurations
 module.exports = {
-  // Document upload (for staff documents)
+  // Staff creation (NEW - for creating new staff)
+  uploadStaffCreation,
+  staffCreationFields: uploadStaffCreation.fields([
+    { name: 'profileImage', maxCount: 1 },
+    { name: 'idCardImage', maxCount: 1 },
+    { name: 'documents', maxCount: 20 }
+  ]),
+  
+  // Document upload (for existing staff)
   uploadDocuments,
   uploadSingle: uploadDocuments.single('profileImage'),
   uploadArray: uploadDocuments.array('documents', 10),
