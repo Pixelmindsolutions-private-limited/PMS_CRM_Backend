@@ -243,10 +243,10 @@ const teamMembersSchema = new mongoose.Schema({
 // Main Project Schema
 const projectSchema = new mongoose.Schema({
   projectId: { type: String, unique: true, trim: true },
-  projectName: { type: String, required: true, trim: true },
+  projectName: { type: String, unique: true, required: true, trim: true },
   clientName: { type: String, required: true, trim: true },
   clientMobile: { type: String, trim: true },
-  clientEmail: { type: String, trim: true, lowercase: true },
+  clientEmail: { type: String, unique: true, trim: true, lowercase: true },
   clientAddress: { type: String, default: '' },
   category: { 
     type: String, 
@@ -268,12 +268,10 @@ const projectSchema = new mongoose.Schema({
   marketing: { type: marketingSchema, default: () => ({}) },
   budgetInstallments: [budgetInstallmentSchema],
   milestonePayments: [milestonePaymentSchema],
-  teamMembers: { type: teamMembersSchema, default: () => ({}) },
-  uploadfile: { type: String, default: null },
-  quotationfile: { type: String, default: null }
+  teamMembers: { type: teamMembersSchema, default: () => ({}) }
 }, { timestamps: true });
 
-// Generate Project ID before saving
+// Generate Project ID before saving (e.g., PRJ24050001)
 projectSchema.pre('save', async function(next) {
   if (!this.projectId) {
     try {

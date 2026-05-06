@@ -33,28 +33,45 @@
 
 const express = require('express');
 const router = express.Router();
-const { staffCreationFields } = require('../config/upload.config');
 const {
+  getProjectOptions,
   createProject,
   getAllProjects,
   getProjectById,
   updateProject,
   deleteProject,
+  addMilestonePayment,
+  updateMilestonePayment,
+  deleteMilestonePayment,
+  addBudgetInstallment,
+  deleteBudgetInstallment,
+  addTeamMember,
+  removeTeamMember,
   getProjectStats
 } = require('../controllers/project.controller.js');
 
-// File upload configuration for projects
-const projectUploadFields = staffCreationFields.fields([
-  { name: 'uploadfile', maxCount: 1 },
-  { name: 'quotationfile', maxCount: 1 }
-]);
-
-// Project routes
-router.post('/', projectUploadFields, createProject);
-router.get('/', getAllProjects);
+// ==================== STATISTICS & OPTIONS (MUST BE BEFORE PARAM ROUTES) ====================
 router.get('/stats', getProjectStats);
+router.get('/options', getProjectOptions);
+
+// ==================== MAIN CRUD ROUTES ====================
+router.post('/', createProject);
+router.get('/', getAllProjects);
 router.get('/:id', getProjectById);
-router.put('/:id', projectUploadFields, updateProject);
+router.put('/:id', updateProject);
 router.delete('/:id', deleteProject);
+
+// ==================== MILESTONE PAYMENT ROUTES ====================
+router.post('/:id/milestones', addMilestonePayment);
+router.put('/:projectId/milestones/:milestoneId', updateMilestonePayment);
+router.delete('/:projectId/milestones/:milestoneId', deleteMilestonePayment);
+
+// ==================== BUDGET INSTALLMENT ROUTES ====================
+router.post('/:id/budget', addBudgetInstallment);
+router.delete('/:projectId/budget/:installmentId', deleteBudgetInstallment);
+
+// ==================== TEAM MEMBERS ROUTES ====================
+router.post('/:id/team', addTeamMember);
+router.delete('/:id/team/:role/:memberName', removeTeamMember);
 
 module.exports = router;
