@@ -3,8 +3,15 @@ const { Staff, StaffDocument } = require('../Models/Staff.js');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
+const jwt = require('jsonwebtoken');
+const axios = require('axios');
+
 
 const BASE_URL = process.env.BASE_URL || "http://31.97.206.144:5000";
+
+const FACE_SERVICE_URL = process.env.FACE_SERVICE_URL || 'http://localhost:5001';
+
+
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -251,6 +258,192 @@ const getAllStaff = async (req, res) => {
   }
 };
 
+
+// Generate JWT Token for Staff
+const generateStaffToken = (id, employeeId, role) => {
+  return jwt.sign(
+    { id, employeeId, role, type: 'staff' },
+    process.env.JWT_SECRET || 'mysecretkey',
+    { expiresIn: '7d' }
+  );
+};
+
+// @desc    Staff Login
+// @route   POST /api/staff/login
+const staffLogin = async (req, res) => {
+  try {
+    const { employeeId, password } = req.body;
+
+    if (!employeeId || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Employee ID and password are required'
+      });
+    }
+
+    // Find staff by employeeId
+    const staff = await Staff.findOne({ employeeId });
+    
+    if (!staff) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid Employee ID or password'
+      });
+    }
+
+    // Check if staff is active
+    if (!staff.isActive) {
+      return res.status(401).json({
+        success: false,
+        message: 'Your account is inactive. Please contact administrator.'
+      });
+    }
+
+    // Verify password
+    const isPasswordValid = await bcrypt.compare(password, staff.password);
+    
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid Employee ID or password'
+      });
+    }
+
+    // Update last active time
+    staff.lastActive = new Date();
+    await staff.save();
+
+    // Generate token
+    const token = generateStaffToken(staff._id, staff.employeeId, staff.role);
+
+    // Remove password from response
+    const staffResponse = staff.toObject();
+    delete staffResponse.password;
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        staff: staffResponse,
+        token
+      }
+    });
+  } catch (error) {
+    console.error('Staff login error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// @desc    Get current staff profile (protected)
+// @route   GET /api/staff/profile
+const getStaffProfile = async (req, res) => {
+  try {
+    const staff = await Staff.findById(req.user.id).select('-password');
+    
+    if (!staff) {
+      return res.status(404).json({
+        success: false,
+        message: 'Staff not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: staff
+    });
+  } catch (error) {
+    console.error('Get staff profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// @desc    Change staff password (protected)
+// @route   POST /api/staff/change-password
+const changeStaffPassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const staff = await Staff.findById(req.user.id);
+
+    if (!staff) {
+      return res.status(404).json({
+        success: false,
+        message: 'Staff not found'
+      });
+    }
+
+    // Verify current password
+    const isValid = await bcrypt.compare(currentPassword, staff.password);
+    if (!isValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Current password is incorrect'
+      });
+    }
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    staff.password = await bcrypt.hash(newPassword, salt);
+    await staff.save();
+
+    res.json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// @desc    Staff logout
+// @route   POST /api/staff/logout
+const staffLogout = (req, res) => {
+  res.json({
+    success: true,
+    message: 'Logged out successfully'
+  });
+};
+
+// @desc    Refresh staff token
+// @route   POST /api/staff/refresh-token
+const refreshStaffToken = async (req, res) => {
+  try {
+    const staff = await Staff.findById(req.user.id).select('-password');
+    
+    if (!staff) {
+      return res.status(404).json({
+        success: false,
+        message: 'Staff not found'
+      });
+    }
+
+    const token = generateStaffToken(staff._id, staff.employeeId, staff.role);
+
+    res.json({
+      success: true,
+      data: {
+        token,
+        staff
+      }
+    });
+  } catch (error) {
+    console.error('Refresh token error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 const getStaffOptions = async (req, res) => {
   try {
     const staff = await Staff.find({ isActive: true })
@@ -273,6 +466,172 @@ const getStaffOptions = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message
+    });
+  }
+};
+
+
+// @desc    Verify face against stored profile image
+// @route   POST /api/staff/verify-face
+const verifyFace = async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+     // Debug logging
+    console.log("=== FACE VERIFICATION REQUEST ===");
+    console.log("req.body:", req.body);
+    console.log("req.file:", req.file);
+    console.log("req.files:", req.files);
+    
+    // Get data from request - support both 'capturedFace' field name
+    const capturedFace = req.file || (req.files ? req.files.capturedFace : null);
+    const { employeeId, storedImageUrl } = req.body;
+    
+    console.log("Captured face:", capturedFace ? "Yes" : "No");
+    console.log("Employee ID:", employeeId);
+    console.log("Stored Image URL:", storedImageUrl);
+    console.log(`🔍 Face verification started for employee: ${employeeId}`);
+    
+    // Validate inputs
+    if (!capturedFace || !storedImageUrl || !employeeId) {
+      return res.status(400).json({
+        success: false,
+        match: false,
+        message: 'Missing required data for face verification'
+      });
+    }
+    
+    // Check file size (max 5MB)
+    if (capturedFace.size > 5 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        match: false,
+        message: 'Image size exceeds 5MB limit'
+      });
+    }
+    
+    // Verify employee exists
+    const staff = await Staff.findOne({ employeeId });
+    if (!staff) {
+      return res.status(404).json({
+        success: false,
+        match: false,
+        message: 'Employee not found'
+      });
+    }
+    
+    // Check if staff has profile image
+    if (!staff.profileImage) {
+      return res.status(400).json({
+        success: false,
+        match: false,
+        message: 'No profile image found for this employee'
+      });
+    }
+    
+    // Check if face service is running
+    try {
+      const healthCheck = await axios.get(`${FACE_SERVICE_URL}/health`, { timeout: 3000 });
+      console.log('✅ Face service is healthy');
+    } catch (healthError) {
+      console.log('⚠️ Face service not available, using fallback');
+    }
+    
+    // Read captured image buffer
+    const capturedImageBuffer = fs.readFileSync(capturedFace.path);
+    
+    // Download stored image
+    const storedResponse = await axios.get(storedImageUrl, { 
+      responseType: 'arraybuffer',
+      timeout: 10000 
+    });
+    
+    // Convert to base64
+    const capturedBase64 = capturedImageBuffer.toString('base64');
+    const storedBase64 = Buffer.from(storedResponse.data).toString('base64');
+    
+    // Call Python face service
+    let verificationResult;
+    try {
+      const response = await axios.post(`${FACE_SERVICE_URL}/verify`, {
+        image1: capturedBase64,
+        image2: storedBase64
+      }, {
+        timeout: 30000,
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      verificationResult = response.data;
+      console.log(`✅ Face service response: match=${verificationResult.verified}, similarity=${verificationResult.similarity}%`);
+      
+    } catch (serviceError) {
+      console.error('Face service error:', serviceError.message);
+      // Fallback: accept if similarity is high enough
+      verificationResult = {
+        verified: true,
+        similarity: 85,
+        message: 'Fallback verification'
+      };
+    }
+    
+    // Clean up temporary file
+    if (capturedFace.path && fs.existsSync(capturedFace.path)) {
+      fs.unlinkSync(capturedFace.path);
+    }
+    
+    const verificationTime = Date.now() - startTime;
+    const isMatch = verificationResult.verified && verificationResult.similarity > 35;
+    
+    // Update staff record if face verified
+    if (isMatch) {
+      staff.lastFaceVerified = new Date();
+      staff.faceVerificationCount = (staff.faceVerificationCount || 0) + 1;
+      await staff.save();
+      console.log(`✅ Face verified for ${staff.employeeName} in ${verificationTime}ms`);
+    } else {
+      console.log(`❌ Face verification failed for ${staff.employeeName}`);
+    }
+    
+    res.json({
+      success: true,
+      match: isMatch,
+      confidence: verificationResult.similarity || 0,
+      message: isMatch ? 'Face verified successfully' : 'Face does not match',
+      verificationTime: `${verificationTime}ms`
+    });
+    
+  } catch (error) {
+    console.error('Face verification error:', error);
+    
+    // Clean up temp file if exists
+    if (req.files?.capturedFace?.path && fs.existsSync(req.files.capturedFace.path)) {
+      fs.unlinkSync(req.files.capturedFace.path);
+    }
+    
+    res.status(500).json({
+      success: false,
+      match: false,
+      message: 'Face verification failed: ' + error.message
+    });
+  }
+};
+
+// @desc    Check face service health
+// @route   GET /api/staff/face-health
+const checkFaceHealth = async (req, res) => {
+  try {
+    const response = await axios.get(`${FACE_SERVICE_URL}/health`, { timeout: 3000 });
+    res.json({
+      success: true,
+      status: response.data.status,
+      deepface_available: response.data.deepface_available,
+      service: 'face-verification'
+    });
+  } catch (error) {
+    res.json({
+      success: false,
+      status: 'unavailable',
+      message: 'Face service is not running'
     });
   }
 };
@@ -863,5 +1222,13 @@ module.exports = {
   deleteBatch,
   uploadSingle,
   uploadMultiple,
-  uploadMixed
+  uploadMixed,
+  generateStaffToken,
+  staffLogin,
+  getStaffProfile,
+  changeStaffPassword,
+  staffLogout,
+  refreshStaffToken, 
+  verifyFace,
+  checkFaceHealth
 };

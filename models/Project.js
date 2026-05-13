@@ -271,9 +271,9 @@ const projectSchema = new mongoose.Schema({
   teamMembers: { type: teamMembersSchema, default: () => ({}) }
 }, { timestamps: true });
 
-// Generate Project ID before saving (e.g., PRJ24050001)
 projectSchema.pre('save', async function(next) {
-  if (!this.projectId) {
+  // Only generate if projectId is not already set
+  if (!this.projectId || this.projectId === '') {
     try {
       const Project = mongoose.model('Project');
       const count = await Project.countDocuments();
@@ -281,7 +281,10 @@ projectSchema.pre('save', async function(next) {
       const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
       const sequence = String(count + 1).padStart(4, '0');
       this.projectId = `PRJ${year}${month}${sequence}`;
+      console.log(`✅ Auto-generated projectId: ${this.projectId}`);
     } catch (error) {
+      console.error('Error generating projectId:', error);
+      // Fallback to timestamp-based ID
       this.projectId = `PRJ${Date.now()}`;
     }
   }

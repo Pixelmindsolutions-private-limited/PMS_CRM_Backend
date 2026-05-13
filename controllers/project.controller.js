@@ -513,9 +513,9 @@ const createProject = async (req, res) => {
   try {
     console.log("📝 Creating new project");
     console.log("req.body:", req.body);
-    
+
     const {
-      projectId,
+      projectId,  // This will be undefined if not sent
       projectName,
       clientName,
       clientMobile,
@@ -544,17 +544,6 @@ const createProject = async (req, res) => {
       });
     }
 
-    // Check if projectId already exists (if provided manually)
-    if (projectId) {
-      const existingProject = await Project.findOne({ projectId });
-      if (existingProject) {
-        return res.status(400).json({
-          success: false,
-          message: 'Project ID already exists'
-        });
-      }
-    }
-
     // Check if project name already exists
     const existingProjectName = await Project.findOne({ projectName });
     if (existingProjectName) {
@@ -564,18 +553,23 @@ const createProject = async (req, res) => {
       });
     }
 
-    const existingClientEmail = await Project.findOne({ clientEmail });
-    if (existingClientEmail) {
-      return res.status(400).json({
-        success: false,
-        message: 'Client email already exists'
-      });
+    // ✅ Only check projectId if it's provided (not undefined or empty string)
+    if (projectId && projectId.trim() !== '') {
+      const existingProject = await Project.findOne({ projectId });
+      if (existingProject) {
+        return res.status(400).json({
+          success: false,
+          message: 'Project ID already exists. Please use a different ID or leave blank for auto-generation.'
+        });
+      }
     }
 
+    // Prepare project data
     const projectData = {
-      projectId: projectId || undefined, // Let auto-generation happen if not provided
-      projectName,
-      clientName,
+      // ✅ Only include projectId if it's provided and not empty
+      ...(projectId && projectId.trim() !== '' && { projectId: projectId.trim() }),
+      projectName: projectName.trim(),
+      clientName: clientName.trim(),
       clientMobile: clientMobile || '',
       clientEmail: clientEmail || '',
       clientAddress: clientAddress || '',
@@ -594,6 +588,8 @@ const createProject = async (req, res) => {
       teamMembers: teamMembers || { frontend: [], backend: [], designer: [], tester: [], manager: [] }
     };
 
+    console.log("📦 Creating project with data:", JSON.stringify(projectData, null, 2));
+
     const project = new Project(projectData);
     await project.save();
 
@@ -608,7 +604,7 @@ const createProject = async (req, res) => {
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
-        message: 'Project ID already exists'
+        message: 'Project ID already exists. Please try again.'
       });
     }
     
@@ -618,7 +614,6 @@ const createProject = async (req, res) => {
     });
   }
 };
-
 // @desc    Get all projects with pagination and filters
 // @route   GET /api/projects
 const getAllProjects = async (req, res) => {
