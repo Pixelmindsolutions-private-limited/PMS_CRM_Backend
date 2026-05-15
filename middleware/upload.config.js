@@ -1,3 +1,6 @@
+
+
+
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -32,7 +35,7 @@ const ensureDir = (dir) => {
 // This is for creating new staff where employeeId doesn't exist yet
 const staffCreationStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Store in temp directory first
+    // Store in temp directory first   
     let uploadPath = 'uploads/temp/';
     
     // Categorize based on field name
