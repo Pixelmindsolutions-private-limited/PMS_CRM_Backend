@@ -1,23 +1,26 @@
-
-
-
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Ensure upload directories exist
+// Get absolute path helper
+const getAbsolutePath = (relativePath) => {
+  return path.join(__dirname, '..', relativePath);
+};
+
+// Ensure upload directories exist with absolute paths
 const createUploadDirs = () => {
   const dirs = [
-    'uploads/fingerprints',
-    'uploads/temp',
-    'uploads/staff/profile',     // ✅ Add this
-    'uploads/staff/idcards',      // ✅ Add this
-    'uploads/staff/documents'     // ✅ Add this
+    getAbsolutePath('uploads/fingerprints'),
+    getAbsolutePath('uploads/temp'),
+    getAbsolutePath('uploads/staff/profile'),
+    getAbsolutePath('uploads/staff/idcards'),
+    getAbsolutePath('uploads/staff/documents')
   ];
   
   dirs.forEach(dir => {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
+      console.log(`✅ Created directory: ${dir}`);
     }
   });
 };
@@ -26,25 +29,24 @@ createUploadDirs();
 
 // Ensure directory exists (helper function)
 const ensureDir = (dir) => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  const absolutePath = path.isAbsolute(dir) ? dir : path.join(__dirname, '..', dir);
+  if (!fs.existsSync(absolutePath)) {
+    fs.mkdirSync(absolutePath, { recursive: true });
   }
+  return absolutePath;
 };
 
-// ==================== STAFF CREATION UPLOAD (NEW) ====================
-// This is for creating new staff where employeeId doesn't exist yet
+// ==================== STAFF CREATION UPLOAD ====================
 const staffCreationStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Store in temp directory first   
     let uploadPath = 'uploads/temp/';
     
-    // Categorize based on field name
     if (file.fieldname === 'profileImage') {
-      uploadPath = 'uploads/staff/profile/';
+      uploadPath = getAbsolutePath('uploads/staff/profile/');
     } else if (file.fieldname === 'idCardImage') {
-      uploadPath = 'uploads/staff/idcards/';
+      uploadPath = getAbsolutePath('uploads/staff/idcards/');
     } else if (file.fieldname === 'documents') {
-      uploadPath = 'uploads/temp/'; // Temp storage until employeeId is known
+      uploadPath = getAbsolutePath('uploads/temp/');
     }
     
     ensureDir(uploadPath);
@@ -54,12 +56,10 @@ const staffCreationStorage = multer.diskStorage({
     const timestamp = Date.now();
     const random = Math.round(Math.random() * 1E9);
     const cleanName = file.originalname.replace(/\s/g, '_');
-    // Use a temporary filename pattern
     cb(null, `temp_${timestamp}_${random}_${cleanName}`);
   }
 });
 
-// File filter for staff creation
 const staffCreationFileFilter = (req, file, cb) => {
   const allowedTypes = [
     'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
@@ -75,20 +75,21 @@ const staffCreationFileFilter = (req, file, cb) => {
   }
 };
 
-// Staff creation upload middleware (handles all files at once)
 const uploadStaffCreation = multer({
   storage: staffCreationStorage,
   fileFilter: staffCreationFileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB per file
-    files: 25 // Max 25 files total
+    fileSize: 10 * 1024 * 1024,
+    files: 25
   }
 });
 
 // ==================== FINGERPRINT STORAGE ====================
 const fingerprintStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/fingerprints/');
+    const uploadPath = getAbsolutePath('uploads/fingerprints/');
+    ensureDir(uploadPath);
+    cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
     const timestamp = Date.now();
@@ -98,16 +99,10 @@ const fingerprintStorage = multer.diskStorage({
   }
 });
 
-// File filter for fingerprint images
 const fingerprintFileFilter = (req, file, cb) => {
   const allowedTypes = [
-    'image/jpeg', 
-    'image/jpg', 
-    'image/png', 
-    'image/bmp', 
-    'image/tiff', 
-    'image/x-wsq', // FBI WSQ format
-    'application/octet-stream' // Raw fingerprint data
+    'image/jpeg', 'image/jpg', 'image/png', 'image/bmp', 
+    'image/tiff', 'image/x-wsq', 'application/octet-stream'
   ];
   
   if (allowedTypes.includes(file.mimetype)) {
@@ -117,20 +112,17 @@ const fingerprintFileFilter = (req, file, cb) => {
   }
 };
 
-// Fingerprint upload middleware
 const uploadFingerprint = multer({
   storage: fingerprintStorage,
   fileFilter: fingerprintFileFilter,
-  limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit for high-res fingerprints
-  }
+  limits: { fileSize: 10 * 1024 * 1024 }
 });
 
 // ==================== DOCUMENT STORAGE ====================
 const documentStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const { employeeId } = req.params;
-    const uploadDir = `uploads/staff/documents/${employeeId}`;
+    const uploadDir = getAbsolutePath(`uploads/staff/documents/${employeeId}`);
     ensureDir(uploadDir);
     cb(null, uploadDir);
   },
@@ -141,7 +133,6 @@ const documentStorage = multer.diskStorage({
   }
 });
 
-// File filter for documents
 const documentFileFilter = (req, file, cb) => {
   const allowedTypes = [
     'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
@@ -157,19 +148,17 @@ const documentFileFilter = (req, file, cb) => {
   }
 };
 
-// Document upload middleware
 const uploadDocuments = multer({
   storage: documentStorage,
   fileFilter: documentFileFilter,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB max
-    files: 10 // Max 10 files at once
+    fileSize: 50 * 1024 * 1024,
+    files: 10
   }
 });
 
 // ==================== EXPORT ALL ====================
 module.exports = {
-  // Staff creation (NEW - for creating new staff)
   uploadStaffCreation,
   staffCreationFields: uploadStaffCreation.fields([
     { name: 'profileImage', maxCount: 1 },
@@ -177,7 +166,6 @@ module.exports = {
     { name: 'documents', maxCount: 20 }
   ]),
   
-  // Document upload (for existing staff)
   uploadDocuments,
   uploadSingle: uploadDocuments.single('profileImage'),
   uploadArray: uploadDocuments.array('documents', 10),
@@ -186,7 +174,6 @@ module.exports = {
     { name: 'documents', maxCount: 5 }
   ]),
   
-  // Fingerprint upload
   uploadFingerprint,
   uploadFingerprintSingle: uploadFingerprint.single('fingerprintImage'),
   uploadFingerprintMultiple: uploadFingerprint.array('fingerprintImages', 6)

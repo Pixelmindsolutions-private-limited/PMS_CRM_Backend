@@ -7,7 +7,8 @@ const jwt = require('jsonwebtoken');
 const axios = require('axios');
 
 
-const BASE_URL = process.env.BASE_URL || "http://31.97.206.144:5000";
+const BASE_URL = process.env.BASE_URL || "https://pmsbackend.pixelmindsolutions.com";
+console.log(`📸 Staff Controller using BASE_URL: ${BASE_URL}`);
 
 const FACE_SERVICE_URL = process.env.FACE_SERVICE_URL || 'http://localhost:5001';
 
@@ -94,6 +95,7 @@ const createStaff = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
+    // Handle profile image upload
     let profileImageUrl = null;
     if (req.files && req.files.profileImage && req.files.profileImage[0]) {
       const profileFile = req.files.profileImage[0];
@@ -103,10 +105,25 @@ const createStaff = async (req, res) => {
       const fileName = `${employeeId}_profile_${Date.now()}${path.extname(profileFile.originalname)}`;
       const finalPath = path.join(profileUploadDir, fileName);
       
-      fs.renameSync(profileFile.path, finalPath);
-      profileImageUrl = `${BASE_URL}/uploads/staff/profile/${fileName}`;
+      try {
+        // Use copyFileSync instead of renameSync (works across devices)
+        fs.copyFileSync(profileFile.path, finalPath);
+        // Delete temp file
+        if (fs.existsSync(profileFile.path)) {
+          fs.unlinkSync(profileFile.path);
+        }
+        console.log(`✅ Profile image saved: ${finalPath}`);
+        profileImageUrl = `${BASE_URL}/uploads/staff/profile/${fileName}`;
+      } catch (fileError) {
+        console.error(`❌ Failed to save profile image: ${fileError.message}`);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to save profile image'
+        });
+      }
     }
 
+    // Handle ID card image upload
     let idCardImageUrl = null;
     if (req.files && req.files.idCardImage && req.files.idCardImage[0]) {
       const idFile = req.files.idCardImage[0];
@@ -116,8 +133,20 @@ const createStaff = async (req, res) => {
       const fileName = `${employeeId}_idcard_${Date.now()}${path.extname(idFile.originalname)}`;
       const finalPath = path.join(idUploadDir, fileName);
       
-      fs.renameSync(idFile.path, finalPath);
-      idCardImageUrl = `${BASE_URL}/uploads/staff/idcards/${fileName}`;
+      try {
+        fs.copyFileSync(idFile.path, finalPath);
+        if (fs.existsSync(idFile.path)) {
+          fs.unlinkSync(idFile.path);
+        }
+        console.log(`✅ ID card saved: ${finalPath}`);
+        idCardImageUrl = `${BASE_URL}/uploads/staff/idcards/${fileName}`;
+      } catch (fileError) {
+        console.error(`❌ Failed to save ID card: ${fileError.message}`);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to save ID card image'
+        });
+      }
     }
 
     let addressObj = {};
@@ -147,6 +176,7 @@ const createStaff = async (req, res) => {
 
     await staff.save();
 
+    // Handle document uploads
     if (req.files && req.files.documents && req.files.documents.length > 0) {
       const documents = req.files.documents;
       const batchId = generateBatchId(employeeId);
@@ -161,24 +191,31 @@ const createStaff = async (req, res) => {
         const fileName = `${Date.now()}_${file.originalname.replace(/\s/g, '_')}`;
         const finalPath = path.join(docDir, fileName);
         
-        fs.renameSync(file.path, finalPath);
-        
-        const docTypeKey = `documentType_${i}`;
-        const docType = req.body[docTypeKey] || 'General';
-        
-        await StaffDocument.create({
-          employeeId: staff.employeeId,
-          employeeName: staff.employeeName,
-          documentName: documentName,
-          fileName: file.originalname,
-          filePath: `${BASE_URL}/uploads/staff/documents/${employeeId}/${fileName}`,
-          fileType: fileType,
-          fileSize: file.size,
-          mimeType: file.mimetype,
-          description: `Document type: ${docType}`,
-          batchId: batchId,
-          uploadedAt: new Date()
-        });
+        try {
+          fs.copyFileSync(file.path, finalPath);
+          if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+          }
+          
+          const docTypeKey = `documentType_${i}`;
+          const docType = req.body[docTypeKey] || 'General';
+          
+          await StaffDocument.create({
+            employeeId: staff.employeeId,
+            employeeName: staff.employeeName,
+            documentName: documentName,
+            fileName: file.originalname,
+            filePath: `${BASE_URL}/uploads/staff/documents/${employeeId}/${fileName}`,
+            fileType: fileType,
+            fileSize: file.size,
+            mimeType: file.mimetype,
+            description: `Document type: ${docType}`,
+            batchId: batchId,
+            uploadedAt: new Date()
+          });
+        } catch (fileError) {
+          console.error(`❌ Failed to save document: ${fileError.message}`);
+        }
       }
     }
 
