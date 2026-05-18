@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { Staff, StaffDocument } = require('../Models/Staff.js');
+const { Staff, StaffDocument } = require('../models/Staff');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
