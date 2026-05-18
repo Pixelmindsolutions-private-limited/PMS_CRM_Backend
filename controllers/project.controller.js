@@ -500,7 +500,7 @@
 // };
 
 
-const Project = require('../Models/Project.js');
+const Project = require('../models/Project');
 
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:5000";

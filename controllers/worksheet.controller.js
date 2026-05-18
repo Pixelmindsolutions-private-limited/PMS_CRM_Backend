@@ -413,8 +413,8 @@
 
 
 
-const Worksheet = require('../Models/Worksheet.js');
-const { Staff } = require('../Models/Staff.js');
+const Worksheet = require('../models/Worksheet');
+const { Staff } = require('../models/Staff');
 
 // ==================== CREATE WORKSHEET ====================
 // @desc    Create new worksheet

@@ -1,5 +1,5 @@
-const WorkSession = require('../Models/Worksession');
-const { Staff } = require('../Models/Staff');
+const WorkSession = require('../models/Worksession');
+const { Staff } = require('../models/Staff');
 
 const activeBreaks = new Map();
 
