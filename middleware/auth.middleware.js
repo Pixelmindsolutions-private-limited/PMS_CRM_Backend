@@ -35,7 +35,7 @@
 
 
 const jwt = require('jsonwebtoken');
-const { Staff } = require('../Models/Staff');
+const { Staff } = require('../models/Staff');
 const Admin = require('../models/Admin');
 
 // Protect routes - works for both Admin and Staff
