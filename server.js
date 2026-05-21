@@ -251,7 +251,7 @@ app.use(helmet({
 
 // CORS
 app.use(cors({
-  origin: ['https://pmsbackend.pixelmindsolutions.com', 'http://localhost:3000', 'http://localhost:3001'],
+  origin: ['https://pmsbackend.pixelmindsolutions.com', 'https://pms-admin.onrender.com', 'http://localhost:3000', 'http://localhost:3001'],
   credentials: true
 }));
 
@@ -522,3 +522,42 @@ app.listen(PORT, () => {
     console.log('⚠️ Profile directory does not exist');
   }
 });  
+
+// // Add this to your server.js or routes
+// app.get('/debug-upload-files', (req, res) => {
+//   const results = {};
+  
+//   // Check profile directory
+//   const profileDir = path.join(__dirname, 'uploads/staff/profile');
+//   if (fs.existsSync(profileDir)) {
+//     results.profile = {
+//       path: profileDir,
+//       files: fs.readdirSync(profileDir).map(f => ({
+//         name: f,
+//         fullPath: path.join(profileDir, f),
+//         exists: fs.existsSync(path.join(profileDir, f)),
+//         url: `${BASE_URL}/uploads/staff/profile/${f}`
+//       }))
+//     };
+//   } else {
+//     results.profile = { exists: false, path: profileDir };
+//   }
+  
+//   // Check ID card directory
+//   const idcardDir = path.join(__dirname, 'uploads/staff/idcards');
+//   if (fs.existsSync(idcardDir)) {
+//     results.idcard = {
+//       path: idcardDir,
+//       files: fs.readdirSync(idcardDir).map(f => ({
+//         name: f,
+//         fullPath: path.join(idcardDir, f),
+//         exists: fs.existsSync(path.join(idcardDir, f)),
+//         url: `${BASE_URL}/uploads/staff/idcards/${f}`
+//       }))
+//     };
+//   } else {
+//     results.idcard = { exists: false, path: idcardDir };
+//   }
+  
+//   res.json(results);
+// });

@@ -47,6 +47,205 @@ const generateBatchId = (employeeId) => {
 
 // ==================== STAFF CRUD OPERATIONS ====================
 
+// const createStaff = async (req, res) => {
+//   try {
+//     const {
+//       employeeId,
+//       employeeName,
+//       role,
+//       mobile,
+//       email,
+//       joiningDate,
+//       bloodGroup,
+//       password,
+//       address,
+//       emergencyContact
+//     } = req.body;
+
+//     if (!employeeId) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Employee ID is required. Please provide a valid Employee ID."
+//       });
+//     }
+    
+//     if (!employeeName || !role || !mobile || !email || !password) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Required fields: employeeName, role, mobile, email, password"
+//       });
+//     }
+
+//     let existingStaff = await Staff.findOne({ employeeId });
+//     if (existingStaff) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Employee ID already exists"
+//       });
+//     }
+    
+//     existingStaff = await Staff.findOne({ $or: [{ email }, { mobile }] });
+//     if (existingStaff) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Staff with this email or mobile already exists"
+//       });
+//     }
+
+//     const salt = await bcrypt.genSalt(10);
+//     const hashedPassword = await bcrypt.hash(password, salt);
+
+//     // Handle profile image upload
+//     let profileImageUrl = null;
+//     if (req.files && req.files.profileImage && req.files.profileImage[0]) {
+//       const profileFile = req.files.profileImage[0];
+//       const profileUploadDir = path.join(__dirname, '../uploads/staff/profile');
+//       ensureDirectoryExists(profileUploadDir);
+      
+//       const fileName = `${employeeId}_profile_${Date.now()}${path.extname(profileFile.originalname)}`;
+//       const finalPath = path.join(profileUploadDir, fileName);
+      
+//       try {
+//         // Use copyFileSync instead of renameSync (works across devices)
+//         fs.copyFileSync(profileFile.path, finalPath);
+//         // Delete temp file
+//         if (fs.existsSync(profileFile.path)) {
+//           fs.unlinkSync(profileFile.path);
+//         }
+//         console.log(`✅ Profile image saved: ${finalPath}`);
+//         profileImageUrl = `${BASE_URL}/uploads/staff/profile/${fileName}`;
+//       } catch (fileError) {
+//         console.error(`❌ Failed to save profile image: ${fileError.message}`);
+//         return res.status(500).json({
+//           success: false,
+//           message: 'Failed to save profile image'
+//         });
+//       }
+//     }
+
+//     // Handle ID card image upload
+//     let idCardImageUrl = null;
+//     if (req.files && req.files.idCardImage && req.files.idCardImage[0]) {
+//       const idFile = req.files.idCardImage[0];
+//       const idUploadDir = path.join(__dirname, '../uploads/staff/idcards');
+//       ensureDirectoryExists(idUploadDir);
+      
+//       const fileName = `${employeeId}_idcard_${Date.now()}${path.extname(idFile.originalname)}`;
+//       const finalPath = path.join(idUploadDir, fileName);
+      
+//       try {
+//         fs.copyFileSync(idFile.path, finalPath);
+//         if (fs.existsSync(idFile.path)) {
+//           fs.unlinkSync(idFile.path);
+//         }
+//         console.log(`✅ ID card saved: ${finalPath}`);
+//         idCardImageUrl = `${BASE_URL}/uploads/staff/idcards/${fileName}`;
+//       } catch (fileError) {
+//         console.error(`❌ Failed to save ID card: ${fileError.message}`);
+//         return res.status(500).json({
+//           success: false,
+//           message: 'Failed to save ID card image'
+//         });
+//       }
+//     }
+
+//     let addressObj = {};
+//     if (address) {
+//       addressObj = typeof address === 'string' ? JSON.parse(address) : address;
+//     }
+
+//     let emergencyObj = {};
+//     if (emergencyContact) {
+//       emergencyObj = typeof emergencyContact === 'string' ? JSON.parse(emergencyContact) : emergencyObj;
+//     }
+
+//     const staff = new Staff({
+//       employeeId,
+//       employeeName,
+//       role,
+//       mobile,
+//       email,
+//       joiningDate: joiningDate || Date.now(),
+//       bloodGroup: bloodGroup || 'Unknown',
+//       password: hashedPassword,
+//       profileImage: profileImageUrl,
+//       idCardImage: idCardImageUrl,
+//       address: addressObj,
+//       emergencyContact: emergencyObj
+//     });
+
+//     await staff.save();
+
+//     // Handle document uploads
+//     if (req.files && req.files.documents && req.files.documents.length > 0) {
+//       const documents = req.files.documents;
+//       const batchId = generateBatchId(employeeId);
+//       const docDir = path.join(__dirname, '../uploads/staff/documents', employeeId);
+//       ensureDirectoryExists(docDir);
+      
+//       for (let i = 0; i < documents.length; i++) {
+//         const file = documents[i];
+//         const fileExtension = path.extname(file.originalname);
+//         const fileType = getFileType(file.originalname);
+//         const documentName = file.originalname.replace(fileExtension, '').replace(/[_-]/g, ' ');
+//         const fileName = `${Date.now()}_${file.originalname.replace(/\s/g, '_')}`;
+//         const finalPath = path.join(docDir, fileName);
+        
+//         try {
+//           fs.copyFileSync(file.path, finalPath);
+//           if (fs.existsSync(file.path)) {
+//             fs.unlinkSync(file.path);
+//           }
+          
+//           const docTypeKey = `documentType_${i}`;
+//           const docType = req.body[docTypeKey] || 'General';
+          
+//           await StaffDocument.create({
+//             employeeId: staff.employeeId,
+//             employeeName: staff.employeeName,
+//             documentName: documentName,
+//             fileName: file.originalname,
+//             filePath: `${BASE_URL}/uploads/staff/documents/${employeeId}/${fileName}`,
+//             fileType: fileType,
+//             fileSize: file.size,
+//             mimeType: file.mimetype,
+//             description: `Document type: ${docType}`,
+//             batchId: batchId,
+//             uploadedAt: new Date()
+//           });
+//         } catch (fileError) {
+//           console.error(`❌ Failed to save document: ${fileError.message}`);
+//         }
+//       }
+//     }
+
+//     const staffResponse = staff.toObject();
+//     delete staffResponse.password;
+
+//     res.status(201).json({
+//       success: true,
+//       message: 'Staff created successfully',
+//       data: staffResponse
+//     });
+
+//   } catch (error) {
+//     console.error('Create staff error:', error);
+
+//     if (error.code === 11000) {
+//       const field = Object.keys(error.keyPattern)[0];
+//       return res.status(400).json({
+//         success: false,
+//         message: `${field} already exists. Please use a different value.`
+//       });
+//     }
+
+//     res.status(500).json({
+//       success: false,
+//       message: error.message || 'Server error while creating staff'
+//     });
+//   }
+// };
+
 const createStaff = async (req, res) => {
   try {
     const {
@@ -62,6 +261,7 @@ const createStaff = async (req, res) => {
       emergencyContact
     } = req.body;
 
+    // Validation checks (keep your existing validation)
     if (!employeeId) {
       return res.status(400).json({
         success: false,
@@ -76,6 +276,7 @@ const createStaff = async (req, res) => {
       });
     }
 
+    // Check for existing staff
     let existingStaff = await Staff.findOne({ employeeId });
     if (existingStaff) {
       return res.status(400).json({
@@ -95,49 +296,91 @@ const createStaff = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Handle profile image upload
+    // Handle profile image upload - FIXED VERSION
     let profileImageUrl = null;
     if (req.files && req.files.profileImage && req.files.profileImage[0]) {
       const profileFile = req.files.profileImage[0];
+      
+      // Log the file details for debugging
+      console.log("📸 Profile file details:", {
+        originalname: profileFile.originalname,
+        path: profileFile.path,
+        size: profileFile.size,
+        destination: profileFile.destination,
+        filename: profileFile.filename
+      });
+      
+      // Check if temp file exists
+      if (!fs.existsSync(profileFile.path)) {
+        console.error(`❌ Temp file not found: ${profileFile.path}`);
+        return res.status(500).json({
+          success: false,
+          message: 'Temporary file not found'
+        });
+      }
+      
       const profileUploadDir = path.join(__dirname, '../uploads/staff/profile');
       ensureDirectoryExists(profileUploadDir);
       
-      const fileName = `${employeeId}_profile_${Date.now()}${path.extname(profileFile.originalname)}`;
+      const fileExtension = path.extname(profileFile.originalname);
+      const fileName = `${employeeId}_profile_${Date.now()}${fileExtension}`;
       const finalPath = path.join(profileUploadDir, fileName);
       
       try {
-        // Use copyFileSync instead of renameSync (works across devices)
-        fs.copyFileSync(profileFile.path, finalPath);
+        // Read the temp file
+        const fileData = fs.readFileSync(profileFile.path);
+        // Write to final destination
+        fs.writeFileSync(finalPath, fileData);
         // Delete temp file
-        if (fs.existsSync(profileFile.path)) {
-          fs.unlinkSync(profileFile.path);
-        }
+        fs.unlinkSync(profileFile.path);
+        
         console.log(`✅ Profile image saved: ${finalPath}`);
+        console.log(`✅ File exists verification: ${fs.existsSync(finalPath)}`);
+        
         profileImageUrl = `${BASE_URL}/uploads/staff/profile/${fileName}`;
       } catch (fileError) {
         console.error(`❌ Failed to save profile image: ${fileError.message}`);
+        console.error(`Stack: ${fileError.stack}`);
         return res.status(500).json({
           success: false,
-          message: 'Failed to save profile image'
+          message: 'Failed to save profile image',
+          error: fileError.message
         });
       }
     }
 
-    // Handle ID card image upload
+    // Handle ID card image upload - FIXED VERSION
     let idCardImageUrl = null;
     if (req.files && req.files.idCardImage && req.files.idCardImage[0]) {
       const idFile = req.files.idCardImage[0];
+      
+      console.log("🪪 ID card file details:", {
+        originalname: idFile.originalname,
+        path: idFile.path,
+        size: idFile.size
+      });
+      
+      if (!fs.existsSync(idFile.path)) {
+        console.error(`❌ Temp ID file not found: ${idFile.path}`);
+        return res.status(500).json({
+          success: false,
+          message: 'Temporary ID file not found'
+        });
+      }
+      
       const idUploadDir = path.join(__dirname, '../uploads/staff/idcards');
       ensureDirectoryExists(idUploadDir);
       
-      const fileName = `${employeeId}_idcard_${Date.now()}${path.extname(idFile.originalname)}`;
+      const fileExtension = path.extname(idFile.originalname);
+      const fileName = `${employeeId}_idcard_${Date.now()}${fileExtension}`;
       const finalPath = path.join(idUploadDir, fileName);
       
       try {
-        fs.copyFileSync(idFile.path, finalPath);
-        if (fs.existsSync(idFile.path)) {
-          fs.unlinkSync(idFile.path);
-        }
+        // Read and write instead of copy
+        const fileData = fs.readFileSync(idFile.path);
+        fs.writeFileSync(finalPath, fileData);
+        fs.unlinkSync(idFile.path);
+        
         console.log(`✅ ID card saved: ${finalPath}`);
         idCardImageUrl = `${BASE_URL}/uploads/staff/idcards/${fileName}`;
       } catch (fileError) {
@@ -149,16 +392,26 @@ const createStaff = async (req, res) => {
       }
     }
 
+    // Parse address and emergency contact (keep as is)
     let addressObj = {};
     if (address) {
-      addressObj = typeof address === 'string' ? JSON.parse(address) : address;
+      try {
+        addressObj = typeof address === 'string' ? JSON.parse(address) : address;
+      } catch (e) {
+        console.error("Address parse error:", e);
+      }
     }
 
     let emergencyObj = {};
     if (emergencyContact) {
-      emergencyObj = typeof emergencyContact === 'string' ? JSON.parse(emergencyContact) : emergencyObj;
+      try {
+        emergencyObj = typeof emergencyContact === 'string' ? JSON.parse(emergencyContact) : emergencyContact;
+      } catch (e) {
+        console.error("Emergency contact parse error:", e);
+      }
     }
 
+    // Create staff record
     const staff = new Staff({
       employeeId,
       employeeName,
@@ -176,7 +429,7 @@ const createStaff = async (req, res) => {
 
     await staff.save();
 
-    // Handle document uploads
+    // Handle document uploads (similarly fix)
     if (req.files && req.files.documents && req.files.documents.length > 0) {
       const documents = req.files.documents;
       const batchId = generateBatchId(employeeId);
@@ -185,6 +438,12 @@ const createStaff = async (req, res) => {
       
       for (let i = 0; i < documents.length; i++) {
         const file = documents[i];
+        
+        if (!fs.existsSync(file.path)) {
+          console.error(`❌ Temp document file not found: ${file.path}`);
+          continue;
+        }
+        
         const fileExtension = path.extname(file.originalname);
         const fileType = getFileType(file.originalname);
         const documentName = file.originalname.replace(fileExtension, '').replace(/[_-]/g, ' ');
@@ -192,10 +451,10 @@ const createStaff = async (req, res) => {
         const finalPath = path.join(docDir, fileName);
         
         try {
-          fs.copyFileSync(file.path, finalPath);
-          if (fs.existsSync(file.path)) {
-            fs.unlinkSync(file.path);
-          }
+          // Read and write instead of copy
+          const fileData = fs.readFileSync(file.path);
+          fs.writeFileSync(finalPath, fileData);
+          fs.unlinkSync(file.path);
           
           const docTypeKey = `documentType_${i}`;
           const docType = req.body[docTypeKey] || 'General';
@@ -230,6 +489,15 @@ const createStaff = async (req, res) => {
 
   } catch (error) {
     console.error('Create staff error:', error);
+    
+    // Clean up any uploaded files if there's an error
+    if (req.files) {
+      Object.values(req.files).flat().forEach(file => {
+        if (fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
+      });
+    }
 
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
