@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 const axios = require('axios');
 
 
-const BASE_URL = process.env.BASE_URL || "https://pmsbackend.pixelmindsolutions.com";
+const BASE_URL = process.env.BASE_URL || "https://crmbackend-oprd.onrender.com";
 console.log(`📸 Staff Controller using BASE_URL: ${BASE_URL}`);
 
 const FACE_SERVICE_URL = process.env.FACE_SERVICE_URL || 'http://localhost:5001';
