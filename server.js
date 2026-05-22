@@ -510,6 +510,7 @@ app.listen(PORT, () => {
   console.log(`📁 Uploads path: ${uploadsPath}`);
   console.log(`📁 Uploads exists: ${fs.existsSync(uploadsPath)}`);
   
+  
   // List existing profile images on startup
   const profileDir = path.join(__dirname, 'uploads/staff/profile');
   if (fs.existsSync(profileDir)) {
