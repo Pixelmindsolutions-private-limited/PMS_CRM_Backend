@@ -25,7 +25,7 @@ mongoose.connect(MONGODB_URI)
     process.exit(1);
   });
 
-const BASE_URL = process.env.BASE_URL || 'https://crmbackend-1-jxmj.onrender.com';
+const BASE_URL = process.env.BASE_URL || 'https://pmsbackend.pixelmindsolutions.com';
 console.log(`🌐 Base URL: ${BASE_URL}`);
 
 // ==================== MIDDLEWARE ====================
@@ -37,7 +37,7 @@ app.use(helmet({
 
 // CORS
 app.use(cors({
-  origin: ['https://crmbackend-1-jxmj.onrender.com', 'https://pms-admin.onrender.com', 'http://localhost:3000', 'http://localhost:3001', '**', '*'],
+  origin: ['https://pmsbackend.pixelmindsolutions.com', 'https://pms-admin.onrender.com', 'http://localhost:3000', 'http://localhost:3001', '**', '*'],
   credentials: true
 }));
 
@@ -334,7 +334,7 @@ app.listen(PORT, () => {
 //     process.exit(1);
 //   });
 
-// const BASE_URL = process.env.BASE_URL || 'https://crmbackend-1-jxmj.onrender.com';
+// const BASE_URL = process.env.BASE_URL || 'https://pmsbackend.pixelmindsolutions.com';
 // console.log(`🌐 Base URL: ${BASE_URL}`);
 
 // // ==================== MIDDLEWARE ====================
@@ -346,7 +346,7 @@ app.listen(PORT, () => {
 
 // // CORS
 // app.use(cors({
-//   origin: ['https://crmbackend-1-jxmj.onrender.com', 'https://pms-admin.onrender.com', 'http://localhost:3000', 'http://localhost:3001' , '**', '*'],
+//   origin: ['https://pmsbackend.pixelmindsolutions.com', 'https://pms-admin.onrender.com', 'http://localhost:3000', 'http://localhost:3001' , '**', '*'],
 //   credentials: true
 // }));
 
