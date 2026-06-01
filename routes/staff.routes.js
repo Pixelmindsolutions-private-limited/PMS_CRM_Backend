@@ -161,7 +161,7 @@ const {
   generateStaffToken,
   getStaffProfile,
   changeStaffPassword
-} = require('../controllers/staff.controller.js');
+} = require('../controllers/staff.controller');
 
 const { protect, staffOnly } = require('../middleware/auth.middleware');
 

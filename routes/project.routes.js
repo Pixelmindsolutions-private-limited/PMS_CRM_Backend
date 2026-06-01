@@ -48,7 +48,7 @@ const {
   addTeamMember,
   removeTeamMember,
   getProjectStats
-} = require('../controllers/project.controller.js');
+} = require('../controllers/project.controller');
 
 // ==================== STATISTICS & OPTIONS (MUST BE BEFORE PARAM ROUTES) ====================
 router.get('/stats', getProjectStats);
