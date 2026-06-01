@@ -133,7 +133,7 @@ const upload = multer({
 const { 
   staffCreationFields, 
   uploadDocuments       
-} = require('../middleware/upload.config.js');
+} = require('../middleware/upload.config');
 
 const {
   createStaff, 
