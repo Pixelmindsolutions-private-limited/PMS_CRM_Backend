@@ -37,18 +37,33 @@ const ensureDir = (dir) => {
 };
 
 // ==================== STAFF CREATION UPLOAD ====================
+// const staffCreationStorage = multer.diskStorage({
+//   destination: (req, file, cb) => {
+//     let uploadPath = 'uploads/temp/';
+    
+//     if (file.fieldname === 'profileImage') {
+//       uploadPath = getAbsolutePath('uploads/staff/profile/');
+//     } else if (file.fieldname === 'idCardImage') {
+//       uploadPath = getAbsolutePath('uploads/staff/idcards/');
+//     } else if (file.fieldname === 'documents') {
+//       uploadPath = getAbsolutePath('uploads/temp/');
+//     }
+    
+//     ensureDir(uploadPath);
+//     cb(null, uploadPath);
+//   },
+//   filename: (req, file, cb) => {
+//     const timestamp = Date.now();
+//     const random = Math.round(Math.random() * 1E9);
+//     const cleanName = file.originalname.replace(/\s/g, '_');
+//     cb(null, `temp_${timestamp}_${random}_${cleanName}`);
+//   }
+// });
+
 const staffCreationStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    let uploadPath = 'uploads/temp/';
-    
-    if (file.fieldname === 'profileImage') {
-      uploadPath = getAbsolutePath('uploads/staff/profile/');
-    } else if (file.fieldname === 'idCardImage') {
-      uploadPath = getAbsolutePath('uploads/staff/idcards/');
-    } else if (file.fieldname === 'documents') {
-      uploadPath = getAbsolutePath('uploads/temp/');
-    }
-    
+    // ALWAYS save to temp first
+    const uploadPath = getAbsolutePath('uploads/temp/');
     ensureDir(uploadPath);
     cb(null, uploadPath);
   },

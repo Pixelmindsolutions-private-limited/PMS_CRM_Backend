@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 const axios = require('axios');
 
 
-const BASE_URL = process.env.BASE_URL || "https://pmsbackend.pixelmindsolutions.com";
+const BASE_URL = process.env.BASE_URL || "https://crmbackend-1-jxmj.onrender.com";
 console.log(`📸 Staff Controller using BASE_URL: ${BASE_URL}`);
 
 const FACE_SERVICE_URL = process.env.FACE_SERVICE_URL || 'http://localhost:5001';
@@ -49,6 +49,12 @@ const generateBatchId = (employeeId) => {
 
 // const createStaff = async (req, res) => {
 //   try {
+//       console.log("=== CREATE STAFF REQUEST ===");
+//       console.log("req.body:", req.body);
+//       console.log("req.file:", req.file);
+//       console.log("req.files:", req.files);
+
+
 //     const {
 //       employeeId,
 //       employeeName,
@@ -62,6 +68,7 @@ const generateBatchId = (employeeId) => {
 //       emergencyContact
 //     } = req.body;
 
+//     // Validation checks (keep your existing validation)
 //     if (!employeeId) {
 //       return res.status(400).json({
 //         success: false,
@@ -76,6 +83,7 @@ const generateBatchId = (employeeId) => {
 //       });
 //     }
 
+//     // Check for existing staff
 //     let existingStaff = await Staff.findOne({ employeeId });
 //     if (existingStaff) {
 //       return res.status(400).json({
@@ -95,49 +103,91 @@ const generateBatchId = (employeeId) => {
 //     const salt = await bcrypt.genSalt(10);
 //     const hashedPassword = await bcrypt.hash(password, salt);
 
-//     // Handle profile image upload
+//     // Handle profile image upload - FIXED VERSION
 //     let profileImageUrl = null;
 //     if (req.files && req.files.profileImage && req.files.profileImage[0]) {
 //       const profileFile = req.files.profileImage[0];
+      
+//       // Log the file details for debugging
+//       console.log("📸 Profile file details:", {
+//         originalname: profileFile.originalname,
+//         path: profileFile.path,
+//         size: profileFile.size,
+//         destination: profileFile.destination,
+//         filename: profileFile.filename
+//       });
+      
+//       // Check if temp file exists
+//       if (!fs.existsSync(profileFile.path)) {
+//         console.error(`❌ Temp file not found: ${profileFile.path}`);
+//         return res.status(500).json({
+//           success: false,
+//           message: 'Temporary file not found'
+//         });
+//       }
+      
 //       const profileUploadDir = path.join(__dirname, '../uploads/staff/profile');
 //       ensureDirectoryExists(profileUploadDir);
       
-//       const fileName = `${employeeId}_profile_${Date.now()}${path.extname(profileFile.originalname)}`;
+//       const fileExtension = path.extname(profileFile.originalname);
+//       const fileName = `${employeeId}_profile_${Date.now()}${fileExtension}`;
 //       const finalPath = path.join(profileUploadDir, fileName);
       
 //       try {
-//         // Use copyFileSync instead of renameSync (works across devices)
-//         fs.copyFileSync(profileFile.path, finalPath);
+//         // Read the temp file
+//         const fileData = fs.readFileSync(profileFile.path);
+//         // Write to final destination
+//         fs.writeFileSync(finalPath, fileData);
 //         // Delete temp file
-//         if (fs.existsSync(profileFile.path)) {
-//           fs.unlinkSync(profileFile.path);
-//         }
+//         fs.unlinkSync(profileFile.path);
+        
 //         console.log(`✅ Profile image saved: ${finalPath}`);
+//         console.log(`✅ File exists verification: ${fs.existsSync(finalPath)}`);
+        
 //         profileImageUrl = `${BASE_URL}/uploads/staff/profile/${fileName}`;
 //       } catch (fileError) {
 //         console.error(`❌ Failed to save profile image: ${fileError.message}`);
+//         console.error(`Stack: ${fileError.stack}`);
 //         return res.status(500).json({
 //           success: false,
-//           message: 'Failed to save profile image'
+//           message: 'Failed to save profile image',
+//           error: fileError.message
 //         });
 //       }
 //     }
 
-//     // Handle ID card image upload
+//     // Handle ID card image upload - FIXED VERSION
 //     let idCardImageUrl = null;
 //     if (req.files && req.files.idCardImage && req.files.idCardImage[0]) {
 //       const idFile = req.files.idCardImage[0];
+      
+//       console.log("🪪 ID card file details:", {
+//         originalname: idFile.originalname,
+//         path: idFile.path,
+//         size: idFile.size
+//       });
+      
+//       if (!fs.existsSync(idFile.path)) {
+//         console.error(`❌ Temp ID file not found: ${idFile.path}`);
+//         return res.status(500).json({
+//           success: false,
+//           message: 'Temporary ID file not found'
+//         });
+//       }
+      
 //       const idUploadDir = path.join(__dirname, '../uploads/staff/idcards');
 //       ensureDirectoryExists(idUploadDir);
       
-//       const fileName = `${employeeId}_idcard_${Date.now()}${path.extname(idFile.originalname)}`;
+//       const fileExtension = path.extname(idFile.originalname);
+//       const fileName = `${employeeId}_idcard_${Date.now()}${fileExtension}`;
 //       const finalPath = path.join(idUploadDir, fileName);
       
 //       try {
-//         fs.copyFileSync(idFile.path, finalPath);
-//         if (fs.existsSync(idFile.path)) {
-//           fs.unlinkSync(idFile.path);
-//         }
+//         // Read and write instead of copy
+//         const fileData = fs.readFileSync(idFile.path);
+//         fs.writeFileSync(finalPath, fileData);
+//         fs.unlinkSync(idFile.path);
+        
 //         console.log(`✅ ID card saved: ${finalPath}`);
 //         idCardImageUrl = `${BASE_URL}/uploads/staff/idcards/${fileName}`;
 //       } catch (fileError) {
@@ -149,16 +199,26 @@ const generateBatchId = (employeeId) => {
 //       }
 //     }
 
+//     // Parse address and emergency contact (keep as is)
 //     let addressObj = {};
 //     if (address) {
-//       addressObj = typeof address === 'string' ? JSON.parse(address) : address;
+//       try {
+//         addressObj = typeof address === 'string' ? JSON.parse(address) : address;
+//       } catch (e) {
+//         console.error("Address parse error:", e);
+//       }
 //     }
 
 //     let emergencyObj = {};
 //     if (emergencyContact) {
-//       emergencyObj = typeof emergencyContact === 'string' ? JSON.parse(emergencyContact) : emergencyObj;
+//       try {
+//         emergencyObj = typeof emergencyContact === 'string' ? JSON.parse(emergencyContact) : emergencyContact;
+//       } catch (e) {
+//         console.error("Emergency contact parse error:", e);
+//       }
 //     }
 
+//     // Create staff record
 //     const staff = new Staff({
 //       employeeId,
 //       employeeName,
@@ -176,7 +236,7 @@ const generateBatchId = (employeeId) => {
 
 //     await staff.save();
 
-//     // Handle document uploads
+//     // Handle document uploads (similarly fix)
 //     if (req.files && req.files.documents && req.files.documents.length > 0) {
 //       const documents = req.files.documents;
 //       const batchId = generateBatchId(employeeId);
@@ -185,6 +245,12 @@ const generateBatchId = (employeeId) => {
       
 //       for (let i = 0; i < documents.length; i++) {
 //         const file = documents[i];
+        
+//         if (!fs.existsSync(file.path)) {
+//           console.error(`❌ Temp document file not found: ${file.path}`);
+//           continue;
+//         }
+        
 //         const fileExtension = path.extname(file.originalname);
 //         const fileType = getFileType(file.originalname);
 //         const documentName = file.originalname.replace(fileExtension, '').replace(/[_-]/g, ' ');
@@ -192,10 +258,10 @@ const generateBatchId = (employeeId) => {
 //         const finalPath = path.join(docDir, fileName);
         
 //         try {
-//           fs.copyFileSync(file.path, finalPath);
-//           if (fs.existsSync(file.path)) {
-//             fs.unlinkSync(file.path);
-//           }
+//           // Read and write instead of copy
+//           const fileData = fs.readFileSync(file.path);
+//           fs.writeFileSync(finalPath, fileData);
+//           fs.unlinkSync(file.path);
           
 //           const docTypeKey = `documentType_${i}`;
 //           const docType = req.body[docTypeKey] || 'General';
@@ -230,6 +296,15 @@ const generateBatchId = (employeeId) => {
 
 //   } catch (error) {
 //     console.error('Create staff error:', error);
+    
+//     // Clean up any uploaded files if there's an error
+//     if (req.files) {
+//       Object.values(req.files).flat().forEach(file => {
+//         if (fs.existsSync(file.path)) {
+//           fs.unlinkSync(file.path);
+//         }
+//       });
+//     }
 
 //     if (error.code === 11000) {
 //       const field = Object.keys(error.keyPattern)[0];
@@ -248,6 +323,12 @@ const generateBatchId = (employeeId) => {
 
 const createStaff = async (req, res) => {
   try {
+      console.log("=== CREATE STAFF REQUEST ===");
+      console.log("req.body:", req.body);
+      console.log("req.file:", req.file);
+      console.log("req.files:", req.files);
+
+
     const {
       employeeId,
       employeeName,
@@ -301,21 +382,18 @@ const createStaff = async (req, res) => {
     if (req.files && req.files.profileImage && req.files.profileImage[0]) {
       const profileFile = req.files.profileImage[0];
       
-      // Log the file details for debugging
       console.log("📸 Profile file details:", {
         originalname: profileFile.originalname,
         path: profileFile.path,
-        size: profileFile.size,
-        destination: profileFile.destination,
-        filename: profileFile.filename
+        size: profileFile.size
       });
       
-      // Check if temp file exists
+      // File already saved by multer at profileFile.path
       if (!fs.existsSync(profileFile.path)) {
-        console.error(`❌ Temp file not found: ${profileFile.path}`);
+        console.error(`❌ File not found: ${profileFile.path}`);
         return res.status(500).json({
           success: false,
-          message: 'Temporary file not found'
+          message: 'Uploaded file not found'
         });
       }
       
@@ -327,24 +405,17 @@ const createStaff = async (req, res) => {
       const finalPath = path.join(profileUploadDir, fileName);
       
       try {
-        // Read the temp file
-        const fileData = fs.readFileSync(profileFile.path);
-        // Write to final destination
-        fs.writeFileSync(finalPath, fileData);
-        // Delete temp file
-        fs.unlinkSync(profileFile.path);
-        
+        // Rename/move the file from multer's location to final location
+        fs.renameSync(profileFile.path, finalPath);
         console.log(`✅ Profile image saved: ${finalPath}`);
         console.log(`✅ File exists verification: ${fs.existsSync(finalPath)}`);
         
         profileImageUrl = `${BASE_URL}/uploads/staff/profile/${fileName}`;
       } catch (fileError) {
-        console.error(`❌ Failed to save profile image: ${fileError.message}`);
-        console.error(`Stack: ${fileError.stack}`);
+        console.error(`❌ Failed to move profile image: ${fileError.message}`);
         return res.status(500).json({
           success: false,
-          message: 'Failed to save profile image',
-          error: fileError.message
+          message: 'Failed to save profile image'
         });
       }
     }
@@ -513,6 +584,8 @@ const createStaff = async (req, res) => {
     });
   }
 };
+
+
 
 const getAllStaff = async (req, res) => {
   try {
