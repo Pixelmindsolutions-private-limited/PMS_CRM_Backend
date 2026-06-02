@@ -517,6 +517,307 @@ const exportWorksheets = async (req, res) => {
   }
 };
 
+// ==================== GET TODAY'S WORKSHEETS FOR EMPLOYEE ====================
+// @desc    Get today's worksheets for a specific employee
+// @route   GET /api/worksheets/employee/:empId/today
+const getEmployeeTodayWorksheets = async (req, res) => {
+  try {
+    const { empId } = req.params;
+    
+    // Get today's date (start of day to end of day)
+    const today = new Date();
+    const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+    const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+
+    // Find worksheets for the employee where any project includes today's date
+    const query = {
+      empId: { $regex: empId, $options: 'i' },
+      'projects': {
+        $elemMatch: {
+          startDate: { $lte: endOfDay },
+          endDate: { $gte: startOfDay }
+        }
+      }
+    };
+
+    const worksheets = await Worksheet.find(query);
+
+    if (!worksheets || worksheets.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No worksheets found for employee ID: ${empId} for today`,
+        data: []
+      });
+    }
+
+    // Filter and format only the projects that are active today
+    const todayWorksheets = worksheets.map(worksheet => {
+      const activeProjects = worksheet.projects.filter(project => {
+        const projectStart = new Date(project.startDate);
+        const projectEnd = new Date(project.endDate);
+        return projectStart <= endOfDay && projectEnd >= startOfDay;
+      });
+
+      return {
+        worksheetId: worksheet._id,
+        empId: worksheet.empId,
+        employName: worksheet.employName,
+        sheet: worksheet.sheet,
+        date: startOfDay,
+        projects: activeProjects.map(project => ({
+          projectName: project.projectName,
+          hours: project.hours,
+          shift: project.shift,
+          comment: project.comment,
+          startDate: project.startDate,
+          endDate: project.endDate
+        }))
+      };
+    });
+
+    // Calculate total hours for today
+    const totalHoursToday = todayWorksheets.reduce((total, worksheet) => {
+      const worksheetHours = worksheet.projects.reduce((sum, project) => sum + project.hours, 0);
+      return total + worksheetHours;
+    }, 0);
+
+    res.json({
+      success: true,
+      data: {
+        employee: {
+          empId: empId,
+          name: todayWorksheets[0]?.employName || 'Unknown'
+        },
+        date: startOfDay,
+        worksheets: todayWorksheets,
+        summary: {
+          totalProjects: todayWorksheets.reduce((sum, w) => sum + w.projects.length, 0),
+          totalHours: totalHoursToday,
+          sheetsCount: todayWorksheets.length
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get employee today worksheets error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// ==================== GET TODAY'S WORKSHEETS FOR ALL EMPLOYEES ====================
+// @desc    Get today's worksheets for all employees
+// @route   GET /api/worksheets/today/all
+const getAllTodayWorksheets = async (req, res) => {
+  try {
+    // Get today's date range
+    const today = new Date();
+    const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+    const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+
+    // Find all worksheets with projects active today
+    const query = {
+      'projects': {
+        $elemMatch: {
+          startDate: { $lte: endOfDay },
+          endDate: { $gte: startOfDay }
+        }
+      }
+    };
+
+    const worksheets = await Worksheet.find(query).sort({ employName: 1 });
+
+    if (!worksheets || worksheets.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No worksheets found for today',
+        data: []
+      });
+    }
+
+    // Process each worksheet to include only today's active projects
+    const todayWorksheets = worksheets.map(worksheet => {
+      const activeProjects = worksheet.projects.filter(project => {
+        const projectStart = new Date(project.startDate);
+        const projectEnd = new Date(project.endDate);
+        return projectStart <= endOfDay && projectEnd >= startOfDay;
+      });
+
+      return {
+        worksheetId: worksheet._id,
+        empId: worksheet.empId,
+        employName: worksheet.employName,
+        sheet: worksheet.sheet,
+        projects: activeProjects.map(project => ({
+          projectName: project.projectName,
+          hours: project.hours,
+          shift: project.shift,
+          comment: project.comment,
+          startDate: project.startDate,
+          endDate: project.endDate
+        }))
+      };
+    }).filter(worksheet => worksheet.projects.length > 0);
+
+    // Calculate summary statistics
+    const totalEmployees = todayWorksheets.length;
+    const totalProjects = todayWorksheets.reduce((sum, w) => sum + w.projects.length, 0);
+    const totalHours = todayWorksheets.reduce((total, worksheet) => {
+      const worksheetHours = worksheet.projects.reduce((sum, project) => sum + project.hours, 0);
+      return total + worksheetHours;
+    }, 0);
+
+    // Group by sheet type
+    const sheetBreakdown = {};
+    todayWorksheets.forEach(worksheet => {
+      if (!sheetBreakdown[worksheet.sheet]) {
+        sheetBreakdown[worksheet.sheet] = {
+          employees: 0,
+          projects: 0,
+          hours: 0
+        };
+      }
+      sheetBreakdown[worksheet.sheet].employees++;
+      sheetBreakdown[worksheet.sheet].projects += worksheet.projects.length;
+      sheetBreakdown[worksheet.sheet].hours += worksheet.projects.reduce((sum, p) => sum + p.hours, 0);
+    });
+
+    // Group by shift
+    const shiftBreakdown = {
+      morning: { employees: 0, projects: 0, hours: 0 },
+      afternoon: { employees: 0, projects: 0, hours: 0 },
+      fullday: { employees: 0, projects: 0, hours: 0 }
+    };
+    
+    todayWorksheets.forEach(worksheet => {
+      worksheet.projects.forEach(project => {
+        const shift = project.shift;
+        if (!shiftBreakdown[shift]) {
+          shiftBreakdown[shift] = { employees: 0, projects: 0, hours: 0 };
+        }
+        shiftBreakdown[shift].projects++;
+        shiftBreakdown[shift].hours += project.hours;
+      });
+    });
+    
+    // Count unique employees per shift
+    Object.keys(shiftBreakdown).forEach(shift => {
+      const employeesWithShift = new Set();
+      todayWorksheets.forEach(worksheet => {
+        const hasShift = worksheet.projects.some(p => p.shift === shift);
+        if (hasShift) employeesWithShift.add(worksheet.empId);
+      });
+      shiftBreakdown[shift].employees = employeesWithShift.size;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        date: startOfDay,
+        summary: {
+          totalEmployees,
+          totalProjects,
+          totalHours,
+          averageHoursPerEmployee: totalEmployees > 0 ? (totalHours / totalEmployees).toFixed(2) : 0
+        },
+        breakdown: {
+          bySheet: sheetBreakdown,
+          byShift: shiftBreakdown
+        },
+        worksheets: todayWorksheets
+      }
+    });
+  } catch (error) {
+    console.error('Get all today worksheets error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// ==================== GET TODAY'S WORKSHEETS BY SHEET TYPE ====================
+// @desc    Get today's worksheets filtered by sheet type
+// @route   GET /api/worksheets/today/sheet/:sheetType
+const getTodayWorksheetsBySheet = async (req, res) => {
+  try {
+    const { sheetType } = req.params;
+    const validSheets = ['frontend', 'backend', 'testing', 'design', 'Full Stack', 'Digital Marketing'];
+    
+    if (!validSheets.includes(sheetType)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid sheet type. Must be one of: ${validSheets.join(', ')}`
+      });
+    }
+
+    // Get today's date range
+    const today = new Date();
+    const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+    const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+
+    const query = {
+      sheet: sheetType,
+      'projects': {
+        $elemMatch: {
+          startDate: { $lte: endOfDay },
+          endDate: { $gte: startOfDay }
+        }
+      }
+    };
+
+    const worksheets = await Worksheet.find(query).sort({ employName: 1 });
+
+    const todayWorksheets = worksheets.map(worksheet => ({
+      worksheetId: worksheet._id,
+      empId: worksheet.empId,
+      employName: worksheet.employName,
+      sheet: worksheet.sheet,
+      projects: worksheet.projects.filter(project => {
+        const projectStart = new Date(project.startDate);
+        const projectEnd = new Date(project.endDate);
+        return projectStart <= endOfDay && projectEnd >= startOfDay;
+      }).map(project => ({
+        projectName: project.projectName,
+        hours: project.hours,
+        shift: project.shift,
+        comment: project.comment,
+        startDate: project.startDate,
+        endDate: project.endDate
+      }))
+    })).filter(w => w.projects.length > 0);
+
+    const totalEmployees = todayWorksheets.length;
+    const totalProjects = todayWorksheets.reduce((sum, w) => sum + w.projects.length, 0);
+    const totalHours = todayWorksheets.reduce((total, w) => {
+      return total + w.projects.reduce((sum, p) => sum + p.hours, 0);
+    }, 0);
+
+    res.json({
+      success: true,
+      data: {
+        sheetType,
+        date: startOfDay,
+        summary: {
+          totalEmployees,
+          totalProjects,
+          totalHours,
+          averageHoursPerEmployee: totalEmployees > 0 ? (totalHours / totalEmployees).toFixed(2) : 0
+        },
+        worksheets: todayWorksheets
+      }
+    });
+  } catch (error) {
+    console.error('Get today worksheets by sheet error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+
 module.exports = {
   createWorksheet,
   getAllWorksheets,
@@ -528,5 +829,8 @@ module.exports = {
   getWorksheetsByEmployee,
   getWorksheetsByProject,
   getWorksheetStats,
-  exportWorksheets
+  exportWorksheets,
+  getEmployeeTodayWorksheets,
+  getAllTodayWorksheets,
+  getTodayWorksheetsBySheet
 };
