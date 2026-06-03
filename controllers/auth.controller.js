@@ -131,6 +131,7 @@ exports.verifyOtp = async (req, res) => {
         id: admin._id,
         email: admin.email,
         name: admin.name,
+        type: 'admin',
         token
       }
     });

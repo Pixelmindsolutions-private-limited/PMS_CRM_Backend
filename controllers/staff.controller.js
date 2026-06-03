@@ -323,12 +323,7 @@ const generateBatchId = (employeeId) => {
 
 const createStaff = async (req, res) => {
   try {
-      console.log("=== CREATE STAFF REQUEST ===");
-      console.log("req.body:", req.body);
-      console.log("req.file:", req.file);
-      console.log("req.files:", req.files);
-
-
+      
     const {
       employeeId,
       employeeName,
