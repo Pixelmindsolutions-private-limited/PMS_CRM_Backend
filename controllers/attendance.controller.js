@@ -1,5 +1,5 @@
 const Attendance = require('../models/Attendance');
-const Staff = require('../models/Staff');
+const { Staff } = require('../models/Staff');
 const mongoose = require('mongoose');
 
 // @desc    Get all staff options for attendance dropdown
@@ -9,29 +9,17 @@ exports.getStaffOptions = async (req, res) => {
   try {
     console.log('👥 Fetching staff options for attendance...');
 
+    // Staff is now defined and can use .find()
     const staff = await Staff.find({ isActive: true })
       .select('employeeId employeeName role')
-      .sort({ staffName: 1 });
+      .sort({ employeeName: 1 });  // Changed from staffName to employeeName
 
-    const options = staff.map(s => {
-      // Log each staff to debug
-      console.log('Processing staff:', {
-        id: s._id,
-        staffId: s.employeeId,
-        employeeId: s.employeeId,
-        staffName: s.employeeName,
-        role: s.role
-      });
-
-      return {
-        id: s._id,
-        staffId: s.staffId || s.employeeId || '', // Use staffId or employeeId as fallback
-        staffName: s.employeeName || '', // This is the correct field name
-        role: s.role || ''
-      };
-    });
-
-    console.log("jjjjjjjjjjjjjjjjjjjjjjjjj",options)
+    const options = staff.map(s => ({
+      _id: s._id,
+      employeeId: s.employeeId,
+      employeeName: s.employeeName,
+      role: s.role
+    }));
 
     res.json({
       success: true,
@@ -52,7 +40,6 @@ exports.getStaffOptions = async (req, res) => {
 // @access  Private
 exports.createAttendance = async (req, res) => {
   try {
-    console.log('📝 Creating attendance for staff:', req.body.name);
 
     const { staffId, name, date, status, dayType, hoursWorked } = req.body;
 

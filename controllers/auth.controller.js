@@ -2,8 +2,8 @@ const Admin = require('../models/Admin');
 const jwt = require('jsonwebtoken');
 
 // Generate JWT Token
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || 'mysecretkey', {
+const generateToken = (id, type = 'admin') => {
+  return jwt.sign({ id, type }, process.env.JWT_SECRET || 'mysecretkey', {
     expiresIn: '7d'
   });
 };
@@ -30,7 +30,7 @@ exports.createAdmin = async (req, res) => {
     });
 
     // Generate token
-    const token = generateToken(admin._id);
+    const token = generateToken(admin._id, 'admin');
 
     res.status(201).json({
       success: true,
@@ -122,7 +122,7 @@ exports.verifyOtp = async (req, res) => {
     await admin.save();
 
     // Generate token
-    const token = generateToken(admin._id);
+    const token = generateToken(admin._id, 'admin');
 
     res.json({
       success: true,
