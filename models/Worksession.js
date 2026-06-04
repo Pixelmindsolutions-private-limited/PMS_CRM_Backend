@@ -123,7 +123,7 @@ const mongoose = require('mongoose');
 
 const activityLogSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
-  type: { type: String, enum: ['active', 'idle', 'break_start', 'break_end', 'work_start', 'work_end', 'idle_popup_shown'], required: true },
+  type: { type: String, enum: ['active', 'idle', 'break_start', 'break_end', 'work_start', 'work_end', 'idle_popup_shown', 'idle_start', 'idle_end', 'heartbeat'], required: true },
   duration: { type: Number, default: 0 },
   details: { type: String, default: '' }
 });

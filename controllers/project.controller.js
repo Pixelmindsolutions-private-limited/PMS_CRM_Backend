@@ -15,7 +15,7 @@ const createProject = async (req, res) => {
     console.log("req.body:", req.body);
 
     const {
-      projectId,  // This will be undefined if not sent
+      projectId,  
       projectName,
       clientName,
       clientMobile,
