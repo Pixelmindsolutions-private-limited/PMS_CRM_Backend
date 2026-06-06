@@ -18,6 +18,12 @@ router.get('/today/all', worksheetController.getAllTodayWorksheets);
 
 // ==================== EXPORT ====================
 router.post('/export', worksheetController.exportWorksheets);
+router.post('/:worksheetId/project/:projectName/tasks', worksheetController.addTaskToProject);
+router.put('/:worksheetId/project/:projectName/task/:taskId/status', worksheetController.updateTaskStatus);
+router.delete('/:worksheetId/project/:projectName/task/:taskId', worksheetController.deleteTask);
+router.post('/:worksheetId/project/:projectName/task/:taskId/comments', worksheetController.addTaskComment);
+router.get('/employee/:empId/tasks', worksheetController.getEmployeeTasks);
+router.get('/:worksheetId/project/:projectName/tasks', worksheetController.getProjectTasks);
 
 // ==================== MAIN CRUD ====================
 router.get('/', worksheetController.getAllWorksheets);

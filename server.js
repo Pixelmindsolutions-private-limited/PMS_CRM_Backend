@@ -37,7 +37,11 @@ app.use(helmet({
 
 // CORS
 app.use(cors({
-  origin: ['https://pmsbackend.pixelmindsolutions.com', 'https://pms-admin.onrender.com', 'http://localhost:3000', 'http://localhost:3001', '**', '*'],
+  origin: ['https://pmsbackend.pixelmindsolutions.com',
+     'https://pms-admin.onrender.com',
+      'http://localhost:3000',
+      'http://31.97.228.17:3537',
+       'http://localhost:3001', '**', '*'],
   credentials: true
 }));
 
