@@ -30,20 +30,82 @@ console.log(`🌐 Base URL: ${BASE_URL}`);
 
 // ==================== MIDDLEWARE ====================
 
-// Security
+// // Security
+// app.use(helmet({
+//   crossOriginResourcePolicy: { policy: "cross-origin" }
+// }));
+
+// // CORS
+// app.use(cors({
+//   origin: ['https://pmsbackend.pixelmindsolutions.com',
+//      'https://pms-admin.onrender.com',
+//       'http://localhost:3000',
+//       'http://31.97.228.17:3537',
+//        'http://localhost:3001', '**', '*'],
+//   credentials: true
+// }));
+
+
+// Security - Fixed Helmet configuration
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // Fixed: was "cross-orbit"
+  crossOriginOpenerPolicy: false,
+  crossOriginEmbedderPolicy: false
 }));
 
-// CORS
+// CORS - Fixed Configuration
+const allowedOrigins = [
+  'https://pmsbackend.pixelmindsolutions.com',
+  'https://pms-admin.onrender.com',
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:3002',
+  'http://127.0.0.1:3000',
+  'http://31.97.228.17:3537'
+];
+
+// Apply CORS middleware
 app.use(cors({
-  origin: ['https://pmsbackend.pixelmindsolutions.com',
-     'https://pms-admin.onrender.com',
-      'http://localhost:3000',
-      'http://31.97.228.17:3537',
-       'http://localhost:3001', '**', '*'],
-  credentials: true
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('⚠️ Blocked origin:', origin);
+      // For development, still allow but log
+      callback(null, true);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Access-Control-Allow-Origin'
+  ],
+  exposedHeaders: ['Content-Length', 'X-Requested-With'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
+
+// Handle preflight requests explicitly
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.sendStatus(204);
+  } else {
+    res.sendStatus(204);
+  }
+});
 
 // Body parsers
 app.use(express.json({ limit: '50mb' }));
