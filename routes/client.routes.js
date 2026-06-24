@@ -15,6 +15,6 @@ router.get('/all', getAllClients);
 router.get('/:id/projects', getClientWithProjects);
 router.get('/:id', getClientById);
 router.put('/:id', updateClient);
-router.delete('/:id', deleteClient);
+router.delete('/:id/delete', deleteClient);
 
 module.exports = router;

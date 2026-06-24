@@ -168,6 +168,31 @@
 // models/Project.js
 const mongoose = require('mongoose');
 
+
+// ============ INSTALLMENT SCHEMA ============
+const installmentSchema = new mongoose.Schema({
+    title: { 
+        type: String, 
+        required: true 
+    },
+    type: { 
+        type: String, 
+        enum: ['amount', 'percentage'], 
+        required: true 
+    },
+    value: { 
+        type: Number, 
+        required: true,
+        min: 0
+    },
+    status: {
+        type: String,
+        enum: ['pending', 'paid'],
+        default: 'pending'
+    }
+}, { timestamps: true });
+
+
 // Team member schema
 const teamMemberSchema = new mongoose.Schema({
     employeeId: { type: String, required: true },
@@ -216,6 +241,20 @@ const projectSchema = new mongoose.Schema({
         testing: { type: [teamMemberSchema], default: [] },
         deployment: { type: [teamMemberSchema], default: [] }
     },
+    // ============ INSTALLMENTS ============
+    installments: { 
+        type: [installmentSchema], 
+        default: [] 
+    },
+    totalPaid: { 
+        type: Number, 
+        default: 0 
+    },
+    remainingAmount: { 
+        type: Number, 
+        default: 0 
+    },
+    
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null }
 }, { timestamps: true });

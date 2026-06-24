@@ -59,12 +59,21 @@ const {
     deleteProject,
     bulkDeleteProjects,
     restoreProject,
-    previewProjectId
+    permanentDeleteProjects,
+
+    // Milestone Payment Routes
+    addInstallment,
+    markAsPaid,
+    editInstallment,
+    deleteInstallment,
+    getInstallments
 } = require('../controllers/project.controller');
 
 // ==================== CREATE ====================
 router.post('/create', createProject);
 router.delete('/delete', bulkDeleteProjects);
+router.delete('/permanent', permanentDeleteProjects);
+
 
 // ==================== READ ====================
 router.get('/all', getAllProjects);
@@ -75,8 +84,17 @@ router.get('/:id', getProjectById);
 // ==================== UPDATE ====================
 router.put('/:id', updateProject);
 
+
 // ==================== DELETE ====================
 router.put('/:id/restore', restoreProject);
+
+
+// ==================== INSTALLMENT ROUTES ====================
+router.post('/:id/installments', addInstallment);
+router.put('/:id/installments/:installmentId/mark-paid', markAsPaid);
+router.put('/:id/installments/:installmentId', editInstallment);
+router.delete('/:id/installments/:installmentId', deleteInstallment);
+router.get('/:id/installments', getInstallments);
 
 
 module.exports = router;

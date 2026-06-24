@@ -1325,3 +1325,375 @@ exports.restoreProject = async (req, res) => {
     }
 };
 
+// @desc    Permanently delete projects (Single or Bulk)
+// @route   DELETE /api/projects/:id/permanent (Single)
+// @route   DELETE /api/projects/bulk/permanent (Bulk)
+exports.permanentDeleteProjects = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { projectIds } = req.body;
+        const ObjectId = require('mongoose').Types.ObjectId;
+
+        // ============ BULK PERMANENT DELETE ============
+        if (projectIds && Array.isArray(projectIds) && projectIds.length > 0) {
+            // Validate each ID format
+            const invalidIds = projectIds.filter(id => !ObjectId.isValid(id));
+            
+            if (invalidIds.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid project ID format',
+                    invalidIds: invalidIds
+                });
+            }
+
+            const projects = await Project.find({
+                _id: { $in: projectIds }
+            });
+
+            if (projects.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No projects found'
+                });
+            }
+
+            const deletedProjects = projects.map(p => ({
+                _id: p._id,
+                projectId: p.projectId,
+                projectName: p.projectName
+            }));
+
+            await Project.deleteMany({
+                _id: { $in: projectIds }
+            });
+
+            return res.json({
+                success: true,
+                message: `${deletedProjects.length} projects permanently deleted`,
+                data: {
+                    deletedCount: deletedProjects.length,
+                    deletedProjects: deletedProjects
+                }
+            });
+        }
+
+        // ============ SINGLE PERMANENT DELETE ============
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: 'Project ID is required'
+            });
+        }
+
+        // Validate ID format
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid project ID format'
+            });
+        }
+
+        const project = await Project.findById(id);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: 'Project not found'
+            });
+        }
+
+        const projectData = {
+            _id: project._id,
+            projectId: project.projectId,
+            projectName: project.projectName
+        };
+
+        await Project.findByIdAndDelete(id);
+
+        res.json({
+            success: true,
+            message: 'Project permanently deleted',
+            data: projectData
+        });
+    } catch (error) {
+        console.error('Permanent delete error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+
+// ==================== INSTALLMENT CONTROLLERS ====================
+
+// @desc    Add installment to project
+// @route   POST /api/projects/:id/installments
+exports.addInstallment = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { title, type, value } = req.body;
+
+        if (!title || !type || !value) {
+            return res.status(400).json({
+                success: false,
+                message: 'Title, type, and value are required'
+            });
+        }
+
+        const project = await Project.findById(id);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: 'Project not found'
+            });
+        }
+
+        // Check if installments exceed milestones
+        if (project.installments.length >= project.paymentMilestone) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot add more than ${project.paymentMilestone} installments`
+            });
+        }
+
+        const installment = {
+            title,
+            type,
+            value,
+            status: 'pending'
+        };
+
+        project.installments.push(installment);
+        await project.save();
+
+        res.status(201).json({
+            success: true,
+            message: 'Installment added successfully',
+            data: {
+                projectId: project.projectId,
+                projectName: project.projectName,
+                installments: project.installments,
+                totalPaid: project.totalPaid,
+                remainingAmount: project.remainingAmount
+            }
+        });
+    } catch (error) {
+        console.error('Add installment error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// @desc    Mark installment as paid
+// @route   PUT /api/projects/:id/installments/:installmentId/mark-paid
+exports.markAsPaid = async (req, res) => {
+    try {
+        const { id, installmentId } = req.params;
+
+        const project = await Project.findById(id);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: 'Project not found'
+            });
+        }
+
+        const installment = project.installments.id(installmentId);
+        if (!installment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Installment not found'
+            });
+        }
+
+        if (installment.status === 'paid') {
+            return res.status(400).json({
+                success: false,
+                message: 'Installment already paid'
+            });
+        }
+
+        installment.status = 'paid';
+        await project.save();
+
+        res.json({
+            success: true,
+            message: 'Installment marked as paid',
+            data: {
+                projectId: project.projectId,
+                projectName: project.projectName,
+                installment,
+                totalPaid: project.totalPaid,
+                remainingAmount: project.remainingAmount
+            }
+        });
+    } catch (error) {
+        console.error('Mark as paid error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// @desc    Edit installment details
+// @route   PUT /api/projects/:id/installments/:installmentId
+exports.editInstallment = async (req, res) => {
+    try {
+        const { id, installmentId } = req.params;
+        const { title, type, value } = req.body;
+
+        const project = await Project.findById(id);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: 'Project not found'
+            });
+        }
+
+        const installment = project.installments.id(installmentId);
+        if (!installment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Installment not found'
+            });
+        }
+
+        // Check if installment is already paid
+        if (installment.status === 'paid') {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot edit paid installment'
+            });
+        }
+
+        // Update fields
+        if (title) installment.title = title;
+        if (type) installment.type = type;
+        if (value !== undefined && value !== null) installment.value = value;
+
+        await project.save();
+
+        res.json({
+            success: true,
+            message: 'Installment updated successfully',
+            data: {
+                projectId: project.projectId,
+                projectName: project.projectName,
+                installment,
+                totalPaid: project.totalPaid,
+                remainingAmount: project.remainingAmount
+            }
+        });
+    } catch (error) {
+        console.error('Edit installment error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// @desc    Delete installment
+// @route   DELETE /api/projects/:id/installments/:installmentId
+exports.deleteInstallment = async (req, res) => {
+    try {
+        const { id, installmentId } = req.params;
+
+        const project = await Project.findById(id);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: 'Project not found'
+            });
+        }
+
+        const installment = project.installments.id(installmentId);
+        if (!installment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Installment not found'
+            });
+        }
+
+        if (installment.status === 'paid') {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot delete paid installment'
+            });
+        }
+
+        project.installments = project.installments.filter(
+            i => i._id.toString() !== installmentId
+        );
+
+        await project.save();
+
+        res.json({
+            success: true,
+            message: 'Installment deleted successfully',
+            data: {
+                projectId: project.projectId,
+                projectName: project.projectName,
+                installments: project.installments,
+                totalPaid: project.totalPaid,
+                remainingAmount: project.remainingAmount
+            }
+        });
+    } catch (error) {
+        console.error('Delete installment error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// @desc    Get all installments
+// @route   GET /api/projects/:id/installments
+exports.getInstallments = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const project = await Project.findById(id)
+            .select('projectId projectName projectCost installments totalPaid remainingAmount paymentMilestone');
+
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: 'Project not found'
+            });
+        }
+
+        const totalInstallments = project.installments.length;
+        const paidInstallments = project.installments.filter(i => i.status === 'paid').length;
+        const pendingInstallments = project.installments.filter(i => i.status === 'pending').length;
+
+        res.json({
+            success: true,
+            data: {
+                projectId: project.projectId,
+                projectName: project.projectName,
+                projectCost: project.projectCost,
+                totalPaid: project.totalPaid,
+                remainingAmount: project.remainingAmount,
+                maxInstallments: project.paymentMilestone,
+                installments: project.installments,
+                summary: {
+                    totalInstallments,
+                    paidInstallments,
+                    pendingInstallments
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get installments error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
