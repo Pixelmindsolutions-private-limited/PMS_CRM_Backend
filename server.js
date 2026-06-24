@@ -168,6 +168,7 @@ app.use('/uploads', (req, res, next) => {
 // ==================== ROUTES ====================
 const authRoutes = require('./routes/auth.routes');
 const projectRoutes = require('./routes/project.routes');
+const clientRoutes = require('./routes/client.routes');
 const staffRoutes = require('./routes/staff.routes');
 const worksheetRoutes = require('./routes/worksheet.routes');
 const attendanceRoutes = require('./routes/attendance.routes');
@@ -178,6 +179,7 @@ const workSessionRoutes = require('./routes/WorkSession.routes');
 // Mount API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/clients', clientRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/worksheets', worksheetRoutes);
