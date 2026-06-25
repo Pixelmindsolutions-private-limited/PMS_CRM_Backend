@@ -725,6 +725,9 @@
 const Project = require('../models/Project');
 const Client = require('../models/Client');
 const Staff = require('../models/Staff');
+const cron = require('node-cron');
+const transporter = require('../config/mailConfig');
+const Invoice = require('../models/Invoice');
 
 // ==================== CREATE ====================
 
@@ -917,6 +920,8 @@ exports.getAllProjects = async (req, res) => {
             total = filteredProjects.length;
         }
 
+        console.log(filteredProjects );
+
         const formattedProjects = filteredProjects.map(project => ({
             _id: project._id,
             projectId: project.projectId,
@@ -936,6 +941,7 @@ exports.getAllProjects = async (req, res) => {
                 email: project.clientId?.email || '',
                 address: project.clientId?.address || ''
             },
+            installments: project.installments || [],
             status: project.isDeleted ? 'deleted' : 'active',
             deletedAt: project.deletedAt,
             createdAt: project.createdAt,
@@ -1424,15 +1430,14 @@ exports.permanentDeleteProjects = async (req, res) => {
     }
 };
 
-
-// ==================== INSTALLMENT CONTROLLERS ====================
+// ==================== INSTALLMENTS OPERATIONS ====================
 
 // @desc    Add installment to project
 // @route   POST /api/projects/:id/installments
 exports.addInstallment = async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, type, value } = req.body;
+        const { title, type, value, dueDate } = req.body;
 
         if (!title || !type || !value) {
             return res.status(400).json({
@@ -1461,6 +1466,7 @@ exports.addInstallment = async (req, res) => {
             title,
             type,
             value,
+            dueDate: dueDate || null,
             status: 'pending'
         };
 
@@ -1487,64 +1493,12 @@ exports.addInstallment = async (req, res) => {
     }
 };
 
-// @desc    Mark installment as paid
-// @route   PUT /api/projects/:id/installments/:installmentId/mark-paid
-exports.markAsPaid = async (req, res) => {
-    try {
-        const { id, installmentId } = req.params;
-
-        const project = await Project.findById(id);
-        if (!project) {
-            return res.status(404).json({
-                success: false,
-                message: 'Project not found'
-            });
-        }
-
-        const installment = project.installments.id(installmentId);
-        if (!installment) {
-            return res.status(404).json({
-                success: false,
-                message: 'Installment not found'
-            });
-        }
-
-        if (installment.status === 'paid') {
-            return res.status(400).json({
-                success: false,
-                message: 'Installment already paid'
-            });
-        }
-
-        installment.status = 'paid';
-        await project.save();
-
-        res.json({
-            success: true,
-            message: 'Installment marked as paid',
-            data: {
-                projectId: project.projectId,
-                projectName: project.projectName,
-                installment,
-                totalPaid: project.totalPaid,
-                remainingAmount: project.remainingAmount
-            }
-        });
-    } catch (error) {
-        console.error('Mark as paid error:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-};
-
 // @desc    Edit installment details
 // @route   PUT /api/projects/:id/installments/:installmentId
 exports.editInstallment = async (req, res) => {
     try {
         const { id, installmentId } = req.params;
-        const { title, type, value } = req.body;
+        const { title, type, value, dueDate } = req.body;
 
         const project = await Project.findById(id);
         if (!project) {
@@ -1562,7 +1516,6 @@ exports.editInstallment = async (req, res) => {
             });
         }
 
-        // Check if installment is already paid
         if (installment.status === 'paid') {
             return res.status(400).json({
                 success: false,
@@ -1570,10 +1523,10 @@ exports.editInstallment = async (req, res) => {
             });
         }
 
-        // Update fields
         if (title) installment.title = title;
         if (type) installment.type = type;
         if (value !== undefined && value !== null) installment.value = value;
+        if (dueDate !== undefined) installment.dueDate = dueDate;
 
         await project.save();
 
@@ -1583,7 +1536,7 @@ exports.editInstallment = async (req, res) => {
             data: {
                 projectId: project.projectId,
                 projectName: project.projectName,
-                installment,
+                installments: project.installments,
                 totalPaid: project.totalPaid,
                 remainingAmount: project.remainingAmount
             }
@@ -1671,6 +1624,9 @@ exports.getInstallments = async (req, res) => {
         const totalInstallments = project.installments.length;
         const paidInstallments = project.installments.filter(i => i.status === 'paid').length;
         const pendingInstallments = project.installments.filter(i => i.status === 'pending').length;
+        const overdueInstallments = project.installments.filter(i => 
+            i.status === 'pending' && i.dueDate && new Date(i.dueDate) < new Date()
+        ).length;
 
         res.json({
             success: true,
@@ -1685,12 +1641,1159 @@ exports.getInstallments = async (req, res) => {
                 summary: {
                     totalInstallments,
                     paidInstallments,
-                    pendingInstallments
+                    pendingInstallments,
+                    overdueInstallments
                 }
             }
         });
     } catch (error) {
         console.error('Get installments error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// // @desc    Mark installment as paid & send invoice
+// // @route   PUT /api/projects/:id/installments/:installmentId/mark-paid
+// exports.markAsPaid = async (req, res) => {
+//     try {
+//         const { id, installmentId } = req.params;
+
+//         const project = await Project.findById(id).populate('clientId');
+//         if (!project) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: 'Project not found'
+//             });
+//         }
+
+//         const installment = project.installments.id(installmentId);
+//         if (!installment) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: 'Installment not found'
+//             });
+//         }
+
+//         if (installment.status === 'paid') {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'Installment already paid'
+//             });
+//         }
+
+//         // Mark as paid
+//         installment.status = 'paid';
+//         await project.save();
+
+//         // ============ GENERATE INVOICE ============
+//         let invoice = null;
+//         let invoiceNumber = null;
+
+//         try {
+//             // Calculate amount
+//             let amount = 0;
+//             if (installment.type === 'percentage') {
+//                 amount = (installment.value / 100) * project.projectCost;
+//             } else {
+//                 amount = installment.value;
+//             }
+
+//             const tax = amount * 0.18; // 18% GST
+//             const totalAmount = amount + tax;
+
+//             // Create invoice
+//             invoice = new Invoice({
+//                 projectId: project._id,
+//                 clientId: project.clientId._id,
+//                 installmentId: installment._id,
+//                 installmentTitle: installment.title,
+//                 amount: amount,
+//                 tax: tax,
+//                 totalAmount: totalAmount,
+//                 status: 'generated',
+//                 dueDate: installment.dueDate || new Date(),
+//                 paymentDate: new Date()
+//             });
+
+//             await invoice.save();
+//             invoiceNumber = invoice.invoiceNumber;
+
+//             // ============ SEND INVOICE EMAIL ============
+//             const client = project.clientId;
+
+//             const htmlContent = `
+//             <!DOCTYPE html>
+//             <html>
+//             <head>
+//                 <style>
+//                     body { font-family: Arial, sans-serif; }
+//                     .container { max-width: 700px; margin: auto; padding: 20px; }
+//                     .header { background: #2c3e50; color: white; padding: 20px; text-align: center; }
+//                     .company { font-size: 24px; font-weight: bold; }
+//                     .invoice-title { font-size: 20px; margin: 10px 0; }
+//                     .details { padding: 20px; }
+//                     .row { display: flex; justify-content: space-between; margin: 10px 0; }
+//                     .table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+//                     .table th { background: #2c3e50; color: white; padding: 10px; text-align: left; }
+//                     .table td { padding: 10px; border-bottom: 1px solid #ddd; }
+//                     .total { font-size: 18px; font-weight: bold; text-align: right; margin: 20px 0; }
+//                     .footer { text-align: center; padding: 20px; color: #777; border-top: 1px solid #eee; }
+//                     .paid-badge { background: #27ae60; color: white; padding: 5px 15px; border-radius: 20px; display: inline-block; }
+//                 </style>
+//             </head>
+//             <body>
+//                 <div class="container">
+//                     <div class="header">
+//                         <div class="company">${process.env.COMPANY_NAME || 'Your Company'}</div>
+//                         <div class="invoice-title">PAYMENT RECEIPT / INVOICE</div>
+//                         <div>Invoice #: ${invoice.invoiceNumber}</div>
+//                         <div>Date: ${new Date().toLocaleDateString()}</div>
+//                     </div>
+                    
+//                     <div class="details">
+//                         <div class="row">
+//                             <div>
+//                                 <strong>Bill To:</strong><br>
+//                                 ${client.name}<br>
+//                                 ${client.email}<br>
+//                                 ${client.address || ''}
+//                             </div>
+//                             <div>
+//                                 <strong>Project:</strong><br>
+//                                 ${project.projectName}
+//                             </div>
+//                         </div>
+
+//                         <div style="text-align: center; margin: 20px 0;">
+//                             <span class="paid-badge">✅ PAID</span>
+//                         </div>
+
+//                         <table class="table">
+//                             <thead>
+//                                 <tr>
+//                                     <th>Description</th>
+//                                     <th style="text-align:right;">Amount</th>
+//                                 </tr>
+//                             </thead>
+//                             <tbody>
+//                                 <tr>
+//                                     <td>${invoice.installmentTitle}</td>
+//                                     <td style="text-align:right;">₹${invoice.amount.toFixed(2)}</td>
+//                                 </tr>
+//                                 ${invoice.tax > 0 ? `<tr>
+//                                     <td>Tax (18% GST)</td>
+//                                     <td style="text-align:right;">₹${invoice.tax.toFixed(2)}</td>
+//                                 </tr>` : ''}
+//                             </tbody>
+//                         </table>
+
+//                         <div class="total">
+//                             Total Amount: ₹${invoice.totalAmount.toFixed(2)}
+//                         </div>
+
+//                         <div style="margin: 20px 0; padding: 15px; background: #f8f9fa;">
+//                             <strong>Payment Status:</strong> ✅ Paid<br>
+//                             <strong>Payment Date:</strong> ${new Date().toLocaleDateString()}<br>
+//                             <strong>Due Date:</strong> ${invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : 'N/A'}
+//                         </div>
+//                     </div>
+
+//                     <div class="footer">
+//                         Thank you for your business!<br>
+//                         ${process.env.COMPANY_EMAIL || 'info@yourcompany.com'} | ${process.env.COMPANY_PHONE || '1234567890'}
+//                     </div>
+//                 </div>
+//             </body>
+//             </html>
+//             `;
+
+//             const mailOptions = {
+//                 from: process.env.MAIL_USER,
+//                 to: client.email,
+//                 cc: process.env.MAIL_USER,
+//                 subject: `✅ Payment Receipt - Invoice #${invoice.invoiceNumber}`,
+//                 html: htmlContent
+//             };
+
+//             await transporter.sendMail(mailOptions);
+
+//             // Update invoice status
+//             invoice.status = 'sent';
+//             invoice.sentAt = new Date();
+//             await invoice.save();
+
+//             console.log(`✅ Invoice ${invoice.invoiceNumber} sent to ${client.email}`);
+
+//         } catch (error) {
+//             console.error('Invoice generation/email error:', error);
+//         }
+
+//         res.json({
+//             success: true,
+//             message: 'Installment marked as paid. Invoice sent to client.',
+//             data: {
+//                 projectId: project.projectId,
+//                 projectName: project.projectName,
+//                 installment,
+//                 totalPaid: project.totalPaid,
+//                 remainingAmount: project.remainingAmount,
+//                 invoice: invoice ? {
+//                     _id: invoice._id,
+//                     invoiceNumber: invoice.invoiceNumber,
+//                     amount: invoice.amount,
+//                     totalAmount: invoice.totalAmount,
+//                     status: invoice.status
+//                 } : null
+//             }
+//         });
+//     } catch (error) {
+//         console.error('Mark as paid error:', error);
+//         res.status(500).json({
+//             success: false,
+//             message: error.message
+//         });
+//     }
+// };
+
+// @desc    Mark installment as paid & send invoice
+// @route   PUT /api/projects/:id/installments/:installmentId/mark-paid
+exports.markAsPaid = async (req, res) => {
+    try {
+        const { id, installmentId } = req.params;
+        const { paymentMode, transactionId } = req.body;
+
+        const project = await Project.findById(id).populate('clientId');
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: 'Project not found'
+            });
+        }
+
+        const installment = project.installments.id(installmentId);
+        if (!installment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Installment not found'
+            });
+        }
+
+        if (installment.status === 'paid') {
+            return res.status(400).json({
+                success: false,
+                message: 'Installment already paid'
+            });
+        }
+
+        // Mark as paid
+        installment.status = 'paid';
+        await project.save();
+
+        // ============ GENERATE INVOICE ============
+        let invoice = null;
+        let invoiceNumber = null;
+
+        try {
+            // Calculate amount
+            let amount = 0;
+            if (installment.type === 'percentage') {
+                amount = (installment.value / 100) * project.projectCost;
+            } else {
+                amount = installment.value;
+            }
+
+            const tax = amount * 0.18; // 18% GST
+            const totalAmount = amount + tax;
+
+            // Create invoice
+            invoice = new Invoice({
+                projectId: project._id,
+                clientId: project.clientId._id,
+                installmentId: installment._id,
+                installmentTitle: installment.title,
+                amount: amount,
+                tax: tax,
+                totalAmount: totalAmount,
+                status: 'generated',
+                dueDate: installment.dueDate || new Date(),
+                paymentDate: new Date(),
+                paymentMode: paymentMode || 'cash',
+                transactionId: transactionId || ''
+            });
+
+            await invoice.save();
+            invoiceNumber = invoice.invoiceNumber;
+
+            // ============ SEND INVOICE EMAIL ============
+            const client = project.clientId;
+
+            const htmlContent = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body { font-family: Arial, sans-serif; }
+                    .container { max-width: 700px; margin: auto; padding: 20px; }
+                    .header { background: #2c3e50; color: white; padding: 20px; text-align: center; }
+                    .company { font-size: 24px; font-weight: bold; }
+                    .invoice-title { font-size: 20px; margin: 10px 0; }
+                    .details { padding: 20px; }
+                    .row { display: flex; justify-content: space-between; margin: 10px 0; }
+                    .table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+                    .table th { background: #2c3e50; color: white; padding: 10px; text-align: left; }
+                    .table td { padding: 10px; border-bottom: 1px solid #ddd; }
+                    .total { font-size: 18px; font-weight: bold; text-align: right; margin: 20px 0; }
+                    .footer { text-align: center; padding: 20px; color: #777; border-top: 1px solid #eee; }
+                    .paid-badge { background: #27ae60; color: white; padding: 5px 15px; border-radius: 20px; display: inline-block; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <div class="company">${process.env.COMPANY_NAME || 'Your Company'}</div>
+                        <div class="invoice-title">PAYMENT RECEIPT / INVOICE</div>
+                        <div>Invoice #: ${invoice.invoiceNumber}</div>
+                        <div>Date: ${new Date().toLocaleDateString()}</div>
+                    </div>
+                    
+                    <div class="details">
+                        <div class="row">
+                            <div>
+                                <strong>Bill To:</strong><br>
+                                ${client.name}<br>
+                                ${client.email}<br>
+                                ${client.address || ''}
+                            </div>
+                            <div>
+                                <strong>Project:</strong><br>
+                                ${project.projectName}
+                            </div>
+                        </div>
+
+                        <div style="text-align: center; margin: 20px 0;">
+                            <span class="paid-badge">✅ PAID</span>
+                        </div>
+
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Description</th>
+                                    <th style="text-align:right;">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>${invoice.installmentTitle}</td>
+                                    <td style="text-align:right;">₹${invoice.amount.toFixed(2)}</td>
+                                </tr>
+                                ${invoice.tax > 0 ? `<tr>
+                                    <td>Tax (18% GST)</td>
+                                    <td style="text-align:right;">₹${invoice.tax.toFixed(2)}</td>
+                                </tr>` : ''}
+                            </tbody>
+                        </table>
+
+                        <div class="total">
+                            Total Amount: ₹${invoice.totalAmount.toFixed(2)}
+                        </div>
+
+                        <div style="margin: 20px 0; padding: 15px; background: #f8f9fa;">
+                            <strong>Payment Status:</strong> ✅ Paid<br>
+                            <strong>Payment Date:</strong> ${new Date().toLocaleDateString()}<br>
+                            <strong>Due Date:</strong> ${invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : 'N/A'}
+                            ${invoice.transactionId ? `<br><strong>Transaction ID:</strong> ${invoice.transactionId}` : ''}
+                        </div>
+                    </div>
+
+                    <div class="footer">
+                        Thank you for your business!<br>
+                        ${process.env.COMPANY_EMAIL || 'info@yourcompany.com'} | ${process.env.COMPANY_PHONE || '1234567890'}
+                    </div>
+                </div>
+            </body>
+            </html>
+            `;
+
+            const mailOptions = {
+                from: process.env.MAIL_USER,
+                to: client.email,
+                cc: process.env.MAIL_USER,
+                subject: `✅ Payment Receipt - Invoice #${invoice.invoiceNumber}`,
+                html: htmlContent
+            };
+
+            await transporter.sendMail(mailOptions);
+
+            // Update invoice status
+            invoice.status = 'sent';
+            invoice.sentAt = new Date();
+            await invoice.save();
+
+            console.log(`✅ Invoice ${invoice.invoiceNumber} sent to ${client.email}`);
+
+        } catch (error) {
+            console.error('Invoice generation/email error:', error);
+        }
+
+        res.json({
+            success: true,
+            message: 'Installment marked as paid. Invoice sent to client.',
+            data: {
+                projectId: project.projectId,
+                projectName: project.projectName,
+                installment,
+                totalPaid: project.totalPaid,
+                remainingAmount: project.remainingAmount,
+                invoice: invoice ? {
+                    _id: invoice._id,
+                    invoiceNumber: invoice.invoiceNumber,
+                    amount: invoice.amount,
+                    totalAmount: invoice.totalAmount,
+                    status: invoice.status,
+                    paymentDate: invoice.paymentDate,
+                    transactionId: invoice.transactionId
+                } : null
+            }
+        });
+    } catch (error) {
+        console.error('Mark as paid error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+
+
+// Send reminder email (reused from cron)
+const sendReminderEmail = (clientEmail, clientName, installment, projectName) => {
+    const mailOptions = {
+        from: process.env.MAIL_USER,
+        to: clientEmail,
+        cc: process.env.COMPANY_EMAIL || process.env.MAIL_USER,
+        bcc: process.env.COMPANY_BCC_EMAIL || '',
+        subject: `⏰ Installment Reminder - ${projectName}`,
+        html: `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body { font-family: Arial, sans-serif; }
+                    .container { max-width: 600px; margin: auto; padding: 20px; }
+                    .header { background: #2c3e50; color: white; padding: 15px; text-align: center; }
+                    .content { padding: 20px; }
+                    .details { margin: 20px 0; }
+                    .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+                    .footer { text-align: center; padding: 15px; color: #777; border-top: 1px solid #eee; margin-top: 20px; }
+                    .highlight { color: #e74c3c; font-weight: bold; }
+                    .company-logo { font-size: 20px; font-weight: bold; color: white; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <div class="company-logo">${process.env.COMPANY_NAME || 'Your Company'}</div>
+                        <h2>⏰ Installment Reminder</h2>
+                    </div>
+                    <div class="content">
+                        <h3>Hello ${clientName},</h3>
+                        <p>This is a reminder for your upcoming installment.</p>
+                        
+                        <div class="details">
+                            <div class="detail-row">
+                                <span><strong>Project:</strong></span>
+                                <span>${projectName}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span><strong>Installment:</strong></span>
+                                <span>${installment.title}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span><strong>Amount:</strong></span>
+                                <span class="highlight">${installment.type === 'percentage' ? installment.value + '%' : '₹' + installment.value}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span><strong>Due Date:</strong></span>
+                                <span class="highlight">${installment.dueDate ? new Date(installment.dueDate).toLocaleDateString() : 'N/A'}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span><strong>Status:</strong></span>
+                                <span>${installment.status === 'pending' ? '⏳ Pending' : '✅ Paid'}</span>
+                            </div>
+                        </div>
+
+                        <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                            <p><strong>📌 Please Note:</strong></p>
+                            <p>Please ensure the payment is completed on time to avoid any delay in the project.</p>
+                            <p>If you have already made the payment, please ignore this email.</p>
+                        </div>
+
+                        <div style="text-align: center; margin: 20px 0;">
+                            <p style="color: #777; font-size: 12px;">
+                                This is an automated reminder. Please do not reply to this email.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>Thank you for your business!</p>
+                        <p><strong>${process.env.COMPANY_NAME || 'Your Company'}</strong></p>
+                        <p>${process.env.COMPANY_EMAIL || 'info@yourcompany.com'} | ${process.env.COMPANY_PHONE || '1234567890'}</p>
+                        <p style="font-size: 12px; color: #999;">
+                            ${process.env.COMPANY_ADDRESS || ''}
+                        </p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `
+    };
+
+    transporter.sendMail(mailOptions, (err, info) => {
+        if (err) {
+            console.error(`❌ Error sending email to ${clientEmail}:`, err);
+        } else {
+            console.log(`✅ Reminder email sent to ${clientEmail} for ${projectName}`);
+            if (process.env.COMPANY_EMAIL) {
+                console.log(`📧 CC sent to company: ${process.env.COMPANY_EMAIL}`);
+            }
+        }
+    });
+};
+
+// ==================== CONTROLLER FUNCTIONS ====================
+
+// @desc    Send reminder emails manually (same logic as cron)
+// @route   POST /api/reminders/send
+exports.sendReminders = async (req, res) => {
+    try {
+        console.log('🔄 Running installment reminder check (Manual)...');
+        console.log(`⏰ Time: ${new Date().toLocaleString()}`);
+        
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
+
+        const nextDay = new Date(tomorrow);
+        nextDay.setDate(nextDay.getDate() + 1);
+
+        const projects = await Project.find({
+            isDeleted: false,
+            'installments.status': 'pending',
+            'installments.dueDate': {
+                $gte: tomorrow,
+                $lt: nextDay
+            }
+        }).populate('clientId');
+
+        console.log(`📋 Found ${projects.length} projects with due installments`);
+
+        let totalReminders = 0;
+        const reminderDetails = [];
+
+        for (const project of projects) {
+            const dueInstallments = project.installments.filter(i => 
+                i.status === 'pending' && 
+                i.dueDate && 
+                new Date(i.dueDate).setHours(0,0,0,0) === tomorrow.getTime()
+            );
+
+            console.log(`  📌 Project: ${project.projectName} - ${dueInstallments.length} due installments`);
+
+            for (const installment of dueInstallments) {
+                if (project.clientId && project.clientId.email) {
+                    sendReminderEmail(
+                        project.clientId.email,
+                        project.clientId.name || 'Client',
+                        installment,
+                        project.projectName
+                    );
+                    totalReminders++;
+                    reminderDetails.push({
+                        projectName: project.projectName,
+                        clientName: project.clientId.name,
+                        clientEmail: project.clientId.email,
+                        installmentTitle: installment.title,
+                        amount: installment.type === 'percentage' ? `${installment.value}%` : `₹${installment.value}`,
+                        dueDate: installment.dueDate
+                    });
+                } else {
+                    console.log(`⚠️ No email found for client: ${project.clientId?.name || 'Unknown'}`);
+                }
+            }
+        }
+
+        console.log(`✅ ${totalReminders} reminder emails sent for tomorrow's due installments.`);
+        console.log('---');
+
+        res.json({
+            success: true,
+            message: `${totalReminders} reminder emails sent successfully`,
+            data: {
+                totalReminders,
+                reminders: reminderDetails,
+                runAt: new Date().toISOString()
+            }
+        });
+    } catch (error) {
+        console.error('❌ Error in reminder check:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// @desc    Get upcoming installments (preview)
+// @route   GET /api/reminders/upcoming
+exports.getUpcomingInstallments = async (req, res) => {
+    try {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
+
+        const nextDay = new Date(tomorrow);
+        nextDay.setDate(nextDay.getDate() + 1);
+
+        const projects = await Project.find({
+            isDeleted: false,
+            'installments.status': 'pending',
+            'installments.dueDate': {
+                $gte: tomorrow,
+                $lt: nextDay
+            }
+        }).populate('clientId', 'name email mobile');
+
+        const upcoming = [];
+
+        for (const project of projects) {
+            const dueInstallments = project.installments.filter(i => 
+                i.status === 'pending' && 
+                i.dueDate && 
+                new Date(i.dueDate).setHours(0,0,0,0) === tomorrow.getTime()
+            );
+
+            for (const installment of dueInstallments) {
+                upcoming.push({
+                    projectId: project._id,
+                    projectName: project.projectName,
+                    clientName: project.clientId?.name || 'Unknown',
+                    clientEmail: project.clientId?.email || 'No Email',
+                    clientMobile: project.clientId?.mobile || 'N/A',
+                    installmentId: installment._id,
+                    installmentTitle: installment.title,
+                    amount: installment.type === 'percentage' ? `${installment.value}%` : `₹${installment.value}`,
+                    dueDate: installment.dueDate,
+                    status: installment.status
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                total: upcoming.length,
+                dueDate: tomorrow.toLocaleDateString(),
+                installments: upcoming
+            }
+        });
+    } catch (error) {
+        console.error('❌ Error in getUpcomingInstallments:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// @desc    Send test reminder for specific project
+// @route   POST /api/reminders/test/:projectId
+exports.sendTestReminder = async (req, res) => {
+    try {
+        const { projectId } = req.params;
+        const { installmentId } = req.body;
+
+        const project = await Project.findById(projectId).populate('clientId');
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: 'Project not found'
+            });
+        }
+
+        let installment;
+        if (installmentId) {
+            installment = project.installments.id(installmentId);
+            if (!installment) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Installment not found'
+                });
+            }
+        } else {
+            // Get first pending installment
+            installment = project.installments.find(i => i.status === 'pending');
+            if (!installment) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No pending installment found'
+                });
+            }
+        }
+
+        if (!project.clientId || !project.clientId.email) {
+            return res.status(400).json({
+                success: false,
+                message: 'Client has no email address'
+            });
+        }
+
+        // Send test email
+        sendReminderEmail(
+            project.clientId.email,
+            project.clientId.name || 'Client',
+            installment,
+            project.projectName
+        );
+
+        res.json({
+            success: true,
+            message: 'Test reminder sent successfully',
+            data: {
+                projectName: project.projectName,
+                clientName: project.clientId.name,
+                clientEmail: project.clientId.email,
+                installmentTitle: installment.title,
+                amount: installment.type === 'percentage' ? `${installment.value}%` : `₹${installment.value}`,
+                dueDate: installment.dueDate,
+                sentAt: new Date().toISOString()
+            }
+        });
+    } catch (error) {
+        console.error('❌ Error in sendTestReminder:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// @desc    Get reminder statistics
+// @route   GET /api/reminders/stats
+exports.getReminderStats = async (req, res) => {
+    try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        const nextDay = new Date(tomorrow);
+        nextDay.setDate(nextDay.getDate() + 1);
+
+        // Total pending installments
+        const totalPending = await Project.aggregate([
+            { $match: { isDeleted: false } },
+            { $unwind: '$installments' },
+            { $match: { 'installments.status': 'pending' } },
+            { $count: 'total' }
+        ]);
+
+        // Due today
+        const dueToday = await Project.aggregate([
+            { $match: { isDeleted: false } },
+            { $unwind: '$installments' },
+            { 
+                $match: { 
+                    'installments.status': 'pending',
+                    'installments.dueDate': {
+                        $gte: today,
+                        $lt: tomorrow
+                    }
+                }
+            },
+            { $count: 'total' }
+        ]);
+
+        // Due tomorrow
+        const dueTomorrow = await Project.aggregate([
+            { $match: { isDeleted: false } },
+            { $unwind: '$installments' },
+            { 
+                $match: { 
+                    'installments.status': 'pending',
+                    'installments.dueDate': {
+                        $gte: tomorrow,
+                        $lt: nextDay
+                    }
+                }
+            },
+            { $count: 'total' }
+        ]);
+
+        // Overdue
+        const overdue = await Project.aggregate([
+            { $match: { isDeleted: false } },
+            { $unwind: '$installments' },
+            { 
+                $match: { 
+                    'installments.status': 'pending',
+                    'installments.dueDate': { $lt: today }
+                }
+            },
+            { $count: 'total' }
+        ]);
+
+        res.json({
+            success: true,
+            data: {
+                totalPending: totalPending[0]?.total || 0,
+                dueToday: dueToday[0]?.total || 0,
+                dueTomorrow: dueTomorrow[0]?.total || 0,
+                overdue: overdue[0]?.total || 0,
+                asOf: new Date().toISOString()
+            }
+        });
+    } catch (error) {
+        console.error('❌ Error in getReminderStats:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+
+
+// ==================== INVOICE CONTROLLERS ====================
+
+exports.getInvoices = async (req, res) => {
+    try {
+        const { 
+            id, 
+            projectId, 
+            clientId, 
+            status, 
+            page = 1, 
+            limit = 10 
+        } = req.query;
+
+        // ============ GET BY ID ============
+        if (id) {
+            const invoice = await Invoice.findById(id)
+                .populate('clientId', 'name email mobile address')
+                .populate('projectId', 'projectName projectId category');
+
+            if (!invoice) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Invoice not found'
+                });
+            }
+
+            return res.json({
+                success: true,
+                data: invoice
+            });
+        }
+
+        // ============ BUILD QUERY ============
+        const query = {};
+
+        if (projectId) query.projectId = projectId;
+        if (clientId) query.clientId = clientId;
+        if (status) query.status = status;
+
+        // ============ GET ALL OR FILTERED ============
+        const total = await Invoice.countDocuments(query);
+        const invoices = await Invoice.find(query)
+            .populate('clientId', 'name email mobile address')
+            .populate('projectId', 'projectName projectId category')
+            .sort({ createdAt: -1 })
+            .limit(parseInt(limit))
+            .skip((parseInt(page) - 1) * parseInt(limit));
+
+        // Calculate total amount
+        const totalAmount = await Invoice.aggregate([
+            { $match: query },
+            { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+        ]);
+
+        // Check if no invoices found
+        if (invoices.length === 0) {
+            let message = 'No invoices found';
+            if (projectId) message = 'No invoices found for this project';
+            if (clientId) message = 'No invoices found for this client';
+            
+            return res.status(404).json({
+                success: false,
+                message: message
+            });
+        }
+
+        // ============ RESPONSE ============
+        const response = {
+            success: true,
+            data: invoices,
+            total: invoices.length,
+            totalAmount: totalAmount[0]?.total || 0,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                pages: Math.ceil(total / parseInt(limit)),
+                total: total
+            }
+        };
+
+        // Add filter info
+        if (projectId) response.filter = { projectId };
+        if (clientId) response.filter = { clientId };
+        if (status) response.filter = { ...response.filter, status };
+
+        res.json(response);
+
+    } catch (error) {
+        console.error('Get invoices error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// @desc    Get invoice statistics
+// @route   GET /api/invoices/stats
+exports.getInvoiceStats = async (req, res) => {
+    try {
+        const total = await Invoice.countDocuments();
+        const sent = await Invoice.countDocuments({ status: 'sent' });
+        const paid = await Invoice.countDocuments({ status: 'paid' });
+        const generated = await Invoice.countDocuments({ status: 'generated' });
+        const overdue = await Invoice.countDocuments({ status: 'overdue' });
+
+        const totalAmount = await Invoice.aggregate([
+            { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+        ]);
+
+        res.json({
+            success: true,
+            data: {
+                total,
+                sent,
+                paid,
+                generated,
+                overdue,
+                totalAmount: totalAmount[0]?.total || 0
+            }
+        });
+    } catch (error) {
+        console.error('Get invoice stats error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+
+
+
+// @desc    Get tomorrow's reminders
+// @route   GET /api/projects/tomorrowreminders
+exports.getTomorrowReminders = async (req, res) => {
+    try {
+        // Get tomorrow's date as string (YYYY-MM-DD)
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+        console.log(`📅 Tomorrow's date: ${tomorrowStr}`);
+
+        // Find ALL projects with pending installments (not deleted)
+        const projects = await Project.find({
+            isDeleted: false
+        }).populate('clientId', 'name email mobile address');
+
+        console.log(`📋 Found ${projects.length} total active projects`);
+
+        const reminders = [];
+        let totalDueTomorrow = 0;
+
+        for (const project of projects) {
+            // Filter pending installments due tomorrow
+            const dueInstallments = project.installments.filter(i => {
+                if (i.status !== 'pending') return false;
+                if (!i.dueDate) return false;
+                
+                // Compare date strings (YYYY-MM-DD)
+                const dueDateStr = new Date(i.dueDate).toISOString().split('T')[0];
+                return dueDateStr === tomorrowStr;
+            });
+
+            if (dueInstallments.length === 0) continue;
+
+            console.log(`✅ Project: ${project.projectName} - ${dueInstallments.length} installments due tomorrow`);
+
+            for (const installment of dueInstallments) {
+                let amount = 0;
+                if (installment.type === 'percentage') {
+                    amount = (installment.value / 100) * project.projectCost;
+                } else {
+                    amount = installment.value;
+                }
+
+                totalDueTomorrow++;
+                reminders.push({
+                    projectId: project._id,
+                    projectName: project.projectName,
+                    projectCost: project.projectCost,
+                    client: {
+                        _id: project.clientId?._id,
+                        name: project.clientId?.name || 'Unknown Client',
+                        email: project.clientId?.email || 'No Email',
+                        mobile: project.clientId?.mobile || 'N/A',
+                        address: project.clientId?.address || ''
+                    },
+                    installment: {
+                        _id: installment._id,
+                        title: installment.title,
+                        type: installment.type,
+                        value: installment.value,
+                        amount: amount,
+                        dueDate: installment.dueDate,
+                        status: installment.status
+                    }
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                dueDate: tomorrowStr,
+                totalDueTomorrow: totalDueTomorrow,
+                totalClients: new Set(reminders.map(r => r.client._id?.toString())).size,
+                reminders: reminders
+            }
+        });
+    } catch (error) {
+        console.error('❌ Error in getTomorrowReminders:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// @desc    DEBUG: Check all pending installments and their due dates
+// @route   GET /api/reminders/debug
+exports.debugReminders = async (req, res) => {
+    try {
+        // Get ALL projects with pending installments
+        const projects = await Project.find({
+            isDeleted: false,
+            'installments.status': 'pending'
+        }).populate('clientId', 'name email');
+
+        console.log(`📋 Found ${projects.length} projects with pending installments`);
+
+        const result = {
+            totalProjects: projects.length,
+            totalPendingInstallments: 0,
+            installments: []
+        };
+
+        for (const project of projects) {
+            const pendingInstallments = project.installments.filter(i => i.status === 'pending');
+            
+            console.log(`📌 Project: ${project.projectName} - ${pendingInstallments.length} pending installments`);
+
+            for (const installment of pendingInstallments) {
+                result.totalPendingInstallments++;
+                
+                // Calculate amount
+                let amount = 0;
+                if (installment.type === 'percentage') {
+                    amount = (installment.value / 100) * project.projectCost;
+                } else {
+                    amount = installment.value;
+                }
+
+                result.installments.push({
+                    projectName: project.projectName,
+                    projectId: project._id,
+                    installmentId: installment._id,
+                    title: installment.title,
+                    type: installment.type,
+                    value: installment.value,
+                    amount: amount,
+                    dueDate: installment.dueDate,
+                    dueDateType: typeof installment.dueDate,
+                    dueDateString: installment.dueDate ? installment.dueDate.toString() : 'null',
+                    status: installment.status,
+                    clientName: project.clientId?.name || 'No Client',
+                    clientEmail: project.clientId?.email || 'No Email'
+                });
+
+                console.log(`   📅 Installment: ${installment.title} - Due: ${installment.dueDate}`);
+            }
+        }
+
+        // Check tomorrow's date
+        const now = new Date();
+        const tomorrow = new Date(Date.UTC(
+            now.getUTCFullYear(),
+            now.getUTCMonth(),
+            now.getUTCDate() + 1,
+            0, 0, 0, 0
+        ));
+        
+        const tomorrowStr = tomorrow.toISOString();
+        const tomorrowDate = tomorrow.toISOString().split('T')[0];
+
+        console.log(`📅 Tomorrow (UTC): ${tomorrowStr}`);
+        console.log(`📅 Tomorrow (Date only): ${tomorrowDate}`);
+
+        // Filter installments due tomorrow
+        const dueTomorrow = result.installments.filter(i => {
+            if (!i.dueDate) return false;
+            const dueDateStr = i.dueDate.split('T')[0]; // Get YYYY-MM-DD
+            return dueDateStr === tomorrowDate;
+        });
+
+        result.dueTomorrow = {
+            count: dueTomorrow.length,
+            installments: dueTomorrow
+        };
+
+        res.json({
+            success: true,
+            data: {
+                debug: result,
+                tomorrow: {
+                    date: tomorrowStr,
+                    dateOnly: tomorrowDate
+                },
+                query: {
+                    isDeleted: false,
+                    'installments.status': 'pending',
+                    'installments.dueDate': {
+                        $gte: tomorrow,
+                        $lt: new Date(Date.UTC(
+                            now.getUTCFullYear(),
+                            now.getUTCMonth(),
+                            now.getUTCDate() + 2,
+                            0, 0, 0, 0
+                        ))
+                    }
+                }
+            }
+        });
+    } catch (error) {
+        console.error('❌ Debug error:', error);
         res.status(500).json({
             success: false,
             message: error.message

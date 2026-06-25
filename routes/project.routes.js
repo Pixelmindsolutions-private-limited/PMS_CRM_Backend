@@ -45,49 +45,146 @@
 // module.exports = router;
 
 
+// // routes/projectRoutes.js
+// const express = require('express');
+// const router = express.Router();
+// const {
+//     createProject,
+//     createMultipleProjects,
+//     getAllProjects,
+//     getProjectById,
+//     getProjectOptions,
+//     getProjectStats,
+//     updateProject,
+//     deleteProject,
+//     bulkDeleteProjects,
+//     restoreProject,
+//     permanentDeleteProjects,
+
+//     // Milestone Payment Routes
+//     addInstallment,
+//     markAsPaid,
+//     editInstallment,
+//     deleteInstallment,
+//     getInstallments,
+
+//     // Reminder Routes
+//     sendReminders,
+//     getUpcomingInstallments,
+//     sendTestReminder,
+//     getReminderStats,
+//     getTomorrowReminders,
+//     debugReminders,
+
+//     // Invoice Routes
+//     getInvoices,
+//     getInvoiceStats,
+//     getInvoicesByProject,
+//     getInvoiceById
+// } = require('../controllers/project.controller');
+
+
+
+// router.get('/options', getProjectOptions);
+// router.get('/stats', getProjectStats);
+
+
+
+// // ==================== REMINDER ROUTES ====================
+// router.post('/sendremainder', sendReminders);
+// router.get('/upcominginstallments', getUpcomingInstallments);
+// router.get('/tomorrow', getTomorrowReminders);
+// router.post('/test/:projectId', sendTestReminder);
+// router.get('/remainderstats', getReminderStats);
+// router.get('/debugreminders', debugReminders);
+
+
+// // ==================== CREATE ====================
+// router.post('/create', createProject);
+// router.get('/all', getAllProjects);
+// router.delete('/delete', bulkDeleteProjects);
+// router.delete('/permanent', permanentDeleteProjects);
+
+
+// // ==================== INVOICE ROUTES ====================
+// router.get('/invoices', getInvoices);
+// router.get('/invoices/stats', getInvoiceStats);
+
+
+// router.get('/:id', getProjectById);
+
+// // ==================== UPDATE ====================
+// router.put('/:id', updateProject);
+
+
+// // ==================== DELETE ====================
+// router.put('/:id/restore', restoreProject);
+
+
+// // ==================== INSTALLMENT ROUTES ====================
+// router.post('/:id/installments', addInstallment);
+// router.put('/:id/installments/:installmentId/mark-paid', markAsPaid);
+// router.put('/:id/installments/:installmentId', editInstallment);
+// router.delete('/:id/installments/:installmentId', deleteInstallment);
+// router.get('/:id/installments', getInstallments);
+
+
+// module.exports = router;
+
 // routes/projectRoutes.js
 const express = require('express');
 const router = express.Router();
 const {
     createProject,
-    createMultipleProjects,
     getAllProjects,
     getProjectById,
     getProjectOptions,
     getProjectStats,
     updateProject,
-    deleteProject,
     bulkDeleteProjects,
     restoreProject,
     permanentDeleteProjects,
-
-    // Milestone Payment Routes
     addInstallment,
     markAsPaid,
     editInstallment,
     deleteInstallment,
-    getInstallments
+    getInstallments,
+    sendReminders,
+    getUpcomingInstallments,
+    sendTestReminder,
+    getReminderStats,
+    getTomorrowReminders,
+    debugReminders,
+    getInvoices,
+    getInvoiceStats
 } = require('../controllers/project.controller');
 
-// ==================== CREATE ====================
+// ==================== STATISTICS & OPTIONS ====================
+router.get('/stats', getProjectStats);
+router.get('/options', getProjectOptions);
+
+// ==================== REMINDER ROUTES ====================
+router.post('/sendremainder', sendReminders);
+router.get('/upcominginstallments', getUpcomingInstallments);
+router.get('/tomorrow', getTomorrowReminders);
+router.post('/test/:projectId', sendTestReminder);
+router.get('/remainderstats', getReminderStats);
+router.get('/debugreminders', debugReminders);
+
+// ==================== INVOICE ROUTES ====================
+router.get('/invoices', getInvoices);
+router.get('/invoices/stats', getInvoiceStats);
+
+// ==================== PROJECT CRUD ====================
 router.post('/create', createProject);
+router.get('/all', getAllProjects);
 router.delete('/delete', bulkDeleteProjects);
 router.delete('/permanent', permanentDeleteProjects);
 
-
-// ==================== READ ====================
-router.get('/all', getAllProjects);
-router.get('/options', getProjectOptions);
-router.get('/stats', getProjectStats);
+// ==================== PROJECT BY ID ====================
 router.get('/:id', getProjectById);
-
-// ==================== UPDATE ====================
 router.put('/:id', updateProject);
-
-
-// ==================== DELETE ====================
 router.put('/:id/restore', restoreProject);
-
 
 // ==================== INSTALLMENT ROUTES ====================
 router.post('/:id/installments', addInstallment);
@@ -95,6 +192,5 @@ router.put('/:id/installments/:installmentId/mark-paid', markAsPaid);
 router.put('/:id/installments/:installmentId', editInstallment);
 router.delete('/:id/installments/:installmentId', deleteInstallment);
 router.get('/:id/installments', getInstallments);
-
 
 module.exports = router;

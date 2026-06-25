@@ -187,6 +187,10 @@ app.use('/api/attendance', attendanceRoutes);
 app.use('/api/fingerprint', fingerprintRoutes);
 app.use('/api/work-session', workSessionRoutes);
 
+
+
+const startReminderJob = require('./cron/installmentReminder');
+startReminderJob();
 // ==================== HEALTH CHECK ====================
 app.get('/api/health', (req, res) => {
   const profileDir = path.join(__dirname, 'uploads/staff/profile');

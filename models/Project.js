@@ -185,6 +185,10 @@ const installmentSchema = new mongoose.Schema({
         required: true,
         min: 0
     },
+    dueDate: { 
+        type: Date, 
+        default: null 
+    },
     status: {
         type: String,
         enum: ['pending', 'paid'],
@@ -284,19 +288,61 @@ projectSchema.statics.generateProjectId = async function() {
     }
 };
 
+// ============ INSTANCE METHODS ============
+
+// Calculate payment summary
+projectSchema.methods.calculatePaymentSummary = function() {
+    let totalPaid = 0;
+    
+    this.installments.forEach(installment => {
+        if (installment.status === 'paid') {
+            let amount = 0;
+            if (installment.type === 'percentage') {
+                amount = (installment.value / 100) * this.projectCost;
+            } else {
+                amount = installment.value;
+            }
+            totalPaid += amount;
+        }
+    });
+    
+    this.totalPaid = totalPaid;
+    this.remainingAmount = this.projectCost - totalPaid;
+    
+    return {
+        totalPaid: this.totalPaid,
+        remainingAmount: this.remainingAmount
+    };
+};
+
+// Validate installments count against milestones
+projectSchema.methods.validateInstallments = function() {
+    if (this.installments.length > this.paymentMilestone) {
+        throw new Error(`Cannot have more than ${this.paymentMilestone} installments`);
+    }
+    return true;
+};
+
 // ============ PRE-SAVE HOOK ============
 
 projectSchema.pre('save', async function(next) {
     try {
+        // Generate project ID
         if (!this.projectId) {
             this.projectId = await this.constructor.generateProjectId();
         }
+        
+        // Calculate payment summary
+        this.calculatePaymentSummary();
+        
+        // Validate installments count
+        this.validateInstallments();
+        
         next();
     } catch (error) {
         next(error);
     }
 });
-
 
 const Project = mongoose.model('Project', projectSchema);
 
