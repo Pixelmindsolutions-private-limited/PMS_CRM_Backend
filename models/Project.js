@@ -210,7 +210,32 @@ const workDivisionSchema = new mongoose.Schema({
     frontend: { type: Number, default: 0 },
     backend: { type: Number, default: 0 },
     testing: { type: Number, default: 0 },
-    deployment: { type: Number, default: 0 }
+    deployment: { type: Number, default: 0 },
+    marketing: { type: Number, default: 0 }
+}, { _id: false });
+
+const digitalMarketingSchema = new mongoose.Schema({
+    planId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'DigitalMarketingPlan',
+        default: null
+    },
+    planName: {
+        type: String,
+        default: ''
+    },
+    duration: {
+        type: String,
+        default: ''
+    },
+    price: {
+        type: Number,
+        default: 0
+    },
+    features: {
+        type: [String],
+        default: []
+    }
 }, { _id: false });
 
 const projectSchema = new mongoose.Schema({
@@ -243,7 +268,12 @@ const projectSchema = new mongoose.Schema({
         frontend: { type: [teamMemberSchema], default: [] },
         backend: { type: [teamMemberSchema], default: [] },
         testing: { type: [teamMemberSchema], default: [] },
-        deployment: { type: [teamMemberSchema], default: [] }
+        deployment: { type: [teamMemberSchema], default: [] },
+        marketing: { type: [teamMemberSchema], default: [] }
+    },
+    digitalMarketing: {
+        type: digitalMarketingSchema,
+        default: null
     },
     // ============ INSTALLMENTS ============
     installments: { 

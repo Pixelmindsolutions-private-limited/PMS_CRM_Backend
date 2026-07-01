@@ -175,6 +175,7 @@ const attendanceRoutes = require('./routes/attendance.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
 const fingerprintRoutes = require('./routes/fingerprint.routes');
 const workSessionRoutes = require('./routes/WorkSession.routes');
+const digitalMarketingRoutes = require('./routes/marketing.routes');
 
 // Mount API routes
 app.use('/api/auth', authRoutes);
@@ -186,6 +187,7 @@ app.use('/api/worksheets', worksheetRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/fingerprint', fingerprintRoutes);
 app.use('/api/work-session', workSessionRoutes);
+app.use('/api/digitalmarketing', digitalMarketingRoutes);
 
 
 

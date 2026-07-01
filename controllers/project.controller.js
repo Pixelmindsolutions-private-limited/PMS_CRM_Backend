@@ -721,6 +721,8 @@
 //     getProjectOptions
 //   };
 
+
+
 // controllers/projectController.js
 const Project = require('../models/Project');
 const Client = require('../models/Client');
@@ -728,14 +730,110 @@ const Staff = require('../models/Staff');
 const cron = require('node-cron');
 const transporter = require('../config/mailConfig');
 const Invoice = require('../models/Invoice');
+const { generatePDFReceipt } = require('../services/pdfService');
+
 
 // ==================== CREATE ====================
 
 // @desc    Create new project
 // @route   POST /api/projects
+// exports.createProject = async (req, res) => {
+//     try {
+//         const { clientId, projectName, projectCost, projectStartDate, projectEndDate, deadline, paymentMilestone, category, workDivision, teamAssignment, digitalMarketing  } = req.body;
+
+//         if (!clientId || !projectName) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'Client ID and project name are required'
+//             });
+//         }
+
+//         const client = await Client.findById(clientId);
+//         if (!client) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: 'Client not found'
+//             });
+//         }
+
+//         const project = new Project({
+//             clientId,
+//             projectName: projectName.trim(),
+//             projectCost: projectCost ? Number(projectCost) : 0,
+//             projectStartDate: projectStartDate || null,
+//             projectEndDate: projectEndDate || null,
+//             deadline: deadline || null,
+//             paymentMilestone: paymentMilestone ? Number(paymentMilestone) : 0,
+//             category: category || 'website',
+//             workDivision: workDivision || { designing: 0, frontend: 0, backend: 0, testing: 0, deployment: 0 },
+//             teamAssignment: teamAssignment || { designing: [], frontend: [], backend: [], testing: [], deployment: [] }
+//         });
+
+//         await project.save();
+
+//         const populatedProject = await Project.findById(project._id)
+//             .populate('clientId', 'name email mobile address')
+//             .select('-__v');
+
+//         res.status(201).json({
+//             success: true,
+//             message: 'Project created successfully',
+//             data: {
+//                 _id: populatedProject._id,
+//                 projectId: populatedProject.projectId,
+//                 projectName: populatedProject.projectName,
+//                 projectCost: populatedProject.projectCost,
+//                 projectStartDate: populatedProject.projectStartDate,
+//                 projectEndDate: populatedProject.projectEndDate,
+//                 deadline: populatedProject.deadline,
+//                 paymentMilestone: populatedProject.paymentMilestone,
+//                 category: populatedProject.category,
+//                 workDivision: populatedProject.workDivision,
+//                 teamAssignment: populatedProject.teamAssignment,
+//                 client: {
+//                     _id: populatedProject.clientId._id,
+//                     name: populatedProject.clientId.name,
+//                     mobile: populatedProject.clientId.mobile,
+//                     email: populatedProject.clientId.email,
+//                     address: populatedProject.clientId.address
+//                 },
+//                 status: 'active',
+//                 createdAt: populatedProject.createdAt,
+//                 updatedAt: populatedProject.updatedAt
+//             }
+//         });
+//     } catch (error) {
+//         console.error('Create project error:', error);
+//         if (error.code === 11000) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: 'Duplicate value found. Please try again.'
+//             });
+//         }
+//         res.status(500).json({
+//             success: false,
+//             message: error.message || 'Server error while creating project'
+//         });
+//     }
+// };
+
+// @desc    Create new project
+// @route   POST /api/projects
 exports.createProject = async (req, res) => {
     try {
-        const { clientId, projectName, projectCost, projectStartDate, projectEndDate, deadline, paymentMilestone, category, workDivision, teamAssignment } = req.body;
+        const { 
+            clientId, 
+            projectName, 
+            projectCost, 
+            projectStartDate, 
+            projectEndDate, 
+            deadline, 
+            paymentMilestone, 
+            category, 
+            workDivision, 
+            teamAssignment,
+            digitalMarketing  // ← ADD THIS
+        } = req.body;
 
         if (!clientId || !projectName) {
             return res.status(400).json({
@@ -752,17 +850,76 @@ exports.createProject = async (req, res) => {
             });
         }
 
+        // ============ HANDLE DIGITAL MARKETING ============
+        let finalProjectCost = projectCost ? Number(projectCost) : 0;
+        let digitalMarketingData = null;
+
+        if (category === 'digital marketing' && digitalMarketing) {
+            const DigitalMarketingPlan = require('../models/DigitalMarketingPlan');
+            
+            // Find the plan
+            const plan = await DigitalMarketingPlan.findById(digitalMarketing.planId);
+            if (!plan) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Digital marketing plan not found'
+                });
+            }
+
+            // Find price for selected duration
+            const durationData = plan.durations.find(d => d.duration === digitalMarketing.duration);
+            if (!durationData) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid duration for this plan'
+                });
+            }
+
+            // Set project cost from plan
+            finalProjectCost = durationData.price;
+
+            // Prepare digital marketing data
+            digitalMarketingData = {
+                planId: plan._id,
+                planName: plan.planName,
+                duration: digitalMarketing.duration,
+                price: durationData.price,
+                features: plan.features || []
+            };
+        }
+
+        // ============ PREPARE WORK DIVISION ============
+        let workDivisionData = workDivision || { 
+            designing: 0, 
+            frontend: 0, 
+            backend: 0, 
+            testing: 0, 
+            deployment: 0,
+            marketing: 0 
+        };
+
+        // ============ PREPARE TEAM ASSIGNMENT ============
+        let teamAssignmentData = teamAssignment || { 
+            designing: [], 
+            frontend: [], 
+            backend: [], 
+            testing: [], 
+            deployment: [],
+            marketing: [] 
+        };
+
         const project = new Project({
             clientId,
             projectName: projectName.trim(),
-            projectCost: projectCost ? Number(projectCost) : 0,
+            projectCost: finalProjectCost,
             projectStartDate: projectStartDate || null,
             projectEndDate: projectEndDate || null,
             deadline: deadline || null,
             paymentMilestone: paymentMilestone ? Number(paymentMilestone) : 0,
             category: category || 'website',
-            workDivision: workDivision || { designing: 0, frontend: 0, backend: 0, testing: 0, deployment: 0 },
-            teamAssignment: teamAssignment || { designing: [], frontend: [], backend: [], testing: [], deployment: [] }
+            workDivision: workDivisionData,
+            teamAssignment: teamAssignmentData,
+            digitalMarketing: digitalMarketingData  // ← ADD THIS
         });
 
         await project.save();
@@ -786,6 +943,7 @@ exports.createProject = async (req, res) => {
                 category: populatedProject.category,
                 workDivision: populatedProject.workDivision,
                 teamAssignment: populatedProject.teamAssignment,
+                digitalMarketing: populatedProject.digitalMarketing || null,  // ← ADD THIS
                 client: {
                     _id: populatedProject.clientId._id,
                     name: populatedProject.clientId.name,
@@ -812,7 +970,6 @@ exports.createProject = async (req, res) => {
         });
     }
 };
-
 
 // ==================== READ ====================
 
@@ -934,6 +1091,7 @@ exports.getAllProjects = async (req, res) => {
             category: project.category,
             workDivision: project.workDivision,
             teamAssignment: project.teamAssignment,
+            digitalMarketing: project.digitalMarketing || null,
             client: {
                 _id: project.clientId?._id,
                 name: project.clientId?.name || 'Unknown Client',
@@ -1006,6 +1164,7 @@ exports.getProjectById = async (req, res) => {
                 category: project.category,
                 workDivision: project.workDivision,
                 teamAssignment: project.teamAssignment,
+                digitalMarketing: project.digitalMarketing || null,
                 client: {
                     _id: project.clientId._id,
                     name: project.clientId.name,
@@ -1140,7 +1299,8 @@ exports.updateProject = async (req, res) => {
                 frontend: Number(updateData.workDivision.frontend) || 0,
                 backend: Number(updateData.workDivision.backend) || 0,
                 testing: Number(updateData.workDivision.testing) || 0,
-                deployment: Number(updateData.workDivision.deployment) || 0
+                deployment: Number(updateData.workDivision.deployment) || 0,
+                marketing: Number(updateData.workDivision.marketing) || 0
             };
         }
 
@@ -1151,8 +1311,36 @@ exports.updateProject = async (req, res) => {
                 frontend: updateData.teamAssignment.frontend || [],
                 backend: updateData.teamAssignment.backend || [],
                 testing: updateData.teamAssignment.testing || [],
-                deployment: updateData.teamAssignment.deployment || []
+                deployment: updateData.teamAssignment.deployment || [],
+                marketing: updateData.teamAssignment.marketing || []
             };
+        }
+
+         // Handle digitalMarketing update
+        if (updateData.digitalMarketing) {
+            // If updating digital marketing, validate plan and duration
+            const { planId, duration } = updateData.digitalMarketing;
+            if (planId && duration) {
+                const DigitalMarketingPlan = require('../models/DigitalMarketingPlan');
+                const plan = await DigitalMarketingPlan.findById(planId);
+                if (!plan) {
+                    return res.status(404).json({
+                        success: false,
+                        message: 'Digital marketing plan not found'
+                    });
+                }
+                const durationData = plan.durations.find(d => d.duration === duration);
+                if (!durationData) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Invalid duration for this plan'
+                    });
+                }
+                // Update project cost if needed
+                if (updateData.projectCost === undefined || updateData.projectCost === null) {
+                    updateData.projectCost = durationData.price;
+                }
+            }
         }
 
         // Remove fields that shouldn't be updated
@@ -1185,6 +1373,7 @@ exports.updateProject = async (req, res) => {
                 category: updatedProject.category,
                 workDivision: updatedProject.workDivision,
                 teamAssignment: updatedProject.teamAssignment,
+                digitalMarketing: updatedProject.digitalMarketing || null,
                 client: {
                     _id: updatedProject.clientId._id,
                     name: updatedProject.clientId.name,
@@ -1655,11 +1844,12 @@ exports.getInstallments = async (req, res) => {
     }
 };
 
-// // @desc    Mark installment as paid & send invoice
-// // @route   PUT /api/projects/:id/installments/:installmentId/mark-paid
+// @desc    Mark installment as paid & send invoice
+// @route   PUT /api/projects/:id/installments/:installmentId/mark-paid
 // exports.markAsPaid = async (req, res) => {
 //     try {
 //         const { id, installmentId } = req.params;
+//         const { paymentMode, transactionId } = req.body;
 
 //         const project = await Project.findById(id).populate('clientId');
 //         if (!project) {
@@ -1715,7 +1905,9 @@ exports.getInstallments = async (req, res) => {
 //                 totalAmount: totalAmount,
 //                 status: 'generated',
 //                 dueDate: installment.dueDate || new Date(),
-//                 paymentDate: new Date()
+//                 paymentDate: new Date(),
+//                 paymentMode: paymentMode || 'cash',
+//                 transactionId: transactionId || ''
 //             });
 
 //             await invoice.save();
@@ -1798,6 +1990,7 @@ exports.getInstallments = async (req, res) => {
 //                             <strong>Payment Status:</strong> ✅ Paid<br>
 //                             <strong>Payment Date:</strong> ${new Date().toLocaleDateString()}<br>
 //                             <strong>Due Date:</strong> ${invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : 'N/A'}
+//                             ${invoice.transactionId ? `<br><strong>Transaction ID:</strong> ${invoice.transactionId}` : ''}
 //                         </div>
 //                     </div>
 
@@ -1845,7 +2038,9 @@ exports.getInstallments = async (req, res) => {
 //                     invoiceNumber: invoice.invoiceNumber,
 //                     amount: invoice.amount,
 //                     totalAmount: invoice.totalAmount,
-//                     status: invoice.status
+//                     status: invoice.status,
+//                     paymentDate: invoice.paymentDate,
+//                     transactionId: invoice.transactionId
 //                 } : null
 //             }
 //         });
@@ -1858,7 +2053,7 @@ exports.getInstallments = async (req, res) => {
 //     }
 // };
 
-// @desc    Mark installment as paid & send invoice
+// @desc    Mark installment as paid & send invoice with PDF
 // @route   PUT /api/projects/:id/installments/:installmentId/mark-paid
 exports.markAsPaid = async (req, res) => {
     try {
@@ -1894,7 +2089,7 @@ exports.markAsPaid = async (req, res) => {
 
         // ============ GENERATE INVOICE ============
         let invoice = null;
-        let invoiceNumber = null;
+        let pdfBuffer = null;
 
         try {
             // Calculate amount
@@ -1905,7 +2100,7 @@ exports.markAsPaid = async (req, res) => {
                 amount = installment.value;
             }
 
-            const tax = amount * 0.18; // 18% GST
+            const tax = amount * 0.18;
             const totalAmount = amount + tax;
 
             // Create invoice
@@ -1925,114 +2120,36 @@ exports.markAsPaid = async (req, res) => {
             });
 
             await invoice.save();
-            invoiceNumber = invoice.invoiceNumber;
 
-            // ============ SEND INVOICE EMAIL ============
+            // ============ GENERATE PDF ============
+            pdfBuffer = await generatePDFReceipt(invoice, project, project.clientId);
+
+            // ============ SEND EMAIL ============
             const client = project.clientId;
-
-            const htmlContent = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    body { font-family: Arial, sans-serif; }
-                    .container { max-width: 700px; margin: auto; padding: 20px; }
-                    .header { background: #2c3e50; color: white; padding: 20px; text-align: center; }
-                    .company { font-size: 24px; font-weight: bold; }
-                    .invoice-title { font-size: 20px; margin: 10px 0; }
-                    .details { padding: 20px; }
-                    .row { display: flex; justify-content: space-between; margin: 10px 0; }
-                    .table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-                    .table th { background: #2c3e50; color: white; padding: 10px; text-align: left; }
-                    .table td { padding: 10px; border-bottom: 1px solid #ddd; }
-                    .total { font-size: 18px; font-weight: bold; text-align: right; margin: 20px 0; }
-                    .footer { text-align: center; padding: 20px; color: #777; border-top: 1px solid #eee; }
-                    .paid-badge { background: #27ae60; color: white; padding: 5px 15px; border-radius: 20px; display: inline-block; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <div class="company">${process.env.COMPANY_NAME || 'Your Company'}</div>
-                        <div class="invoice-title">PAYMENT RECEIPT / INVOICE</div>
-                        <div>Invoice #: ${invoice.invoiceNumber}</div>
-                        <div>Date: ${new Date().toLocaleDateString()}</div>
-                    </div>
-                    
-                    <div class="details">
-                        <div class="row">
-                            <div>
-                                <strong>Bill To:</strong><br>
-                                ${client.name}<br>
-                                ${client.email}<br>
-                                ${client.address || ''}
-                            </div>
-                            <div>
-                                <strong>Project:</strong><br>
-                                ${project.projectName}
-                            </div>
-                        </div>
-
-                        <div style="text-align: center; margin: 20px 0;">
-                            <span class="paid-badge">✅ PAID</span>
-                        </div>
-
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>Description</th>
-                                    <th style="text-align:right;">Amount</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>${invoice.installmentTitle}</td>
-                                    <td style="text-align:right;">₹${invoice.amount.toFixed(2)}</td>
-                                </tr>
-                                ${invoice.tax > 0 ? `<tr>
-                                    <td>Tax (18% GST)</td>
-                                    <td style="text-align:right;">₹${invoice.tax.toFixed(2)}</td>
-                                </tr>` : ''}
-                            </tbody>
-                        </table>
-
-                        <div class="total">
-                            Total Amount: ₹${invoice.totalAmount.toFixed(2)}
-                        </div>
-
-                        <div style="margin: 20px 0; padding: 15px; background: #f8f9fa;">
-                            <strong>Payment Status:</strong> ✅ Paid<br>
-                            <strong>Payment Date:</strong> ${new Date().toLocaleDateString()}<br>
-                            <strong>Due Date:</strong> ${invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : 'N/A'}
-                            ${invoice.transactionId ? `<br><strong>Transaction ID:</strong> ${invoice.transactionId}` : ''}
-                        </div>
-                    </div>
-
-                    <div class="footer">
-                        Thank you for your business!<br>
-                        ${process.env.COMPANY_EMAIL || 'info@yourcompany.com'} | ${process.env.COMPANY_PHONE || '1234567890'}
-                    </div>
-                </div>
-            </body>
-            </html>
-            `;
+            const htmlContent = getInvoiceEmailHTML(client, project, invoice);
 
             const mailOptions = {
                 from: process.env.MAIL_USER,
                 to: client.email,
                 cc: process.env.MAIL_USER,
-                subject: `✅ Payment Receipt - Invoice #${invoice.invoiceNumber}`,
-                html: htmlContent
+                subject: `✅ Payment Receipt - ${invoice.invoiceNumber}`,
+                html: htmlContent,
+                attachments: [
+                    {
+                        filename: `invoice-${invoice.invoiceNumber}.pdf`,
+                        content: pdfBuffer,
+                        contentType: 'application/pdf'
+                    }
+                ]
             };
 
             await transporter.sendMail(mailOptions);
 
-            // Update invoice status
             invoice.status = 'sent';
             invoice.sentAt = new Date();
             await invoice.save();
 
-            console.log(`✅ Invoice ${invoice.invoiceNumber} sent to ${client.email}`);
+            console.log(`✅ Invoice ${invoice.invoiceNumber} sent to ${client.email} with PDF`);
 
         } catch (error) {
             console.error('Invoice generation/email error:', error);
@@ -2044,7 +2161,14 @@ exports.markAsPaid = async (req, res) => {
             data: {
                 projectId: project.projectId,
                 projectName: project.projectName,
-                installment,
+                installment: {
+                    _id: installment._id,
+                    title: installment.title,
+                    type: installment.type,
+                    value: installment.value,
+                    status: installment.status,
+                    dueDate: installment.dueDate
+                },
                 totalPaid: project.totalPaid,
                 remainingAmount: project.remainingAmount,
                 invoice: invoice ? {
@@ -2067,6 +2191,87 @@ exports.markAsPaid = async (req, res) => {
     }
 };
 
+// Email Template
+function getInvoiceEmailHTML(client, project, invoice) {
+    return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body { font-family: Arial, sans-serif; }
+            .container { max-width: 600px; margin: auto; padding: 20px; }
+            .header { background: #1a6354; color: white; padding: 20px; text-align: center; }
+            .content { padding: 20px; }
+            .details { margin: 20px 0; padding: 15px; background: #f8fafc; border-radius: 5px; }
+            .footer { text-align: center; padding: 15px; color: #64748b; border-top: 1px solid #e2e8f0; margin-top: 20px; }
+            .paid-badge { background: #1a6354; color: white; padding: 8px 20px; border-radius: 20px; display: inline-block; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h2>✅ Payment Confirmation</h2>
+            </div>
+            <div class="content">
+                <h3>Dear ${client.name},</h3>
+                <p>We are pleased to inform you that your payment has been successfully received.</p>
+                
+                <div style="text-align: center; margin: 20px 0;">
+                    <span class="paid-badge">✅ PAID</span>
+                </div>
+
+                <div class="details">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td><strong>Invoice #:</strong></td>
+                            <td>${invoice.invoiceNumber}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Project:</strong></td>
+                            <td>${project.projectName}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Installment:</strong></td>
+                            <td>${invoice.installmentTitle}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Amount Paid:</strong></td>
+                            <td><strong>₹${invoice.totalAmount.toFixed(2)}</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Payment Date:</strong></td>
+                            <td>${new Date().toLocaleDateString()}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Payment Mode:</strong></td>
+                            <td>${invoice.paymentMode || 'Cash'}</td>
+                        </tr>
+                        ${invoice.transactionId ? `<tr>
+                            <td><strong>Transaction ID:</strong></td>
+                            <td>${invoice.transactionId}</td>
+                        </tr>` : ''}
+                    </table>
+                </div>
+
+                <p style="margin-top: 20px;">
+                    <strong>Payment Summary:</strong><br>
+                    Total Project Cost: ₹${project.projectCost.toFixed(2)}<br>
+                    Total Paid: ₹${project.totalPaid.toFixed(2)}<br>
+                    Remaining Amount: ₹${project.remainingAmount.toFixed(2)}
+                </p>
+
+                <p>Please find your invoice attached as a PDF for your records.</p>
+            </div>
+            <div class="footer">
+                <p>Thank you for your business!</p>
+                <p><strong>${process.env.COMPANY_NAME || 'Pixel Mind Solutions'}</strong></p>
+                <p>${process.env.COMPANY_EMAIL || 'info@pixelmindsolutions.com'} | ${process.env.COMPANY_PHONE || '+919666317749'}</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+}
 
 
 // Send reminder email (reused from cron)
