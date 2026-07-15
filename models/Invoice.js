@@ -39,7 +39,14 @@ const invoiceSchema = new mongoose.Schema({
     paymentDate: { type: Date },
     paymentMode: { type: String },
     transactionId: { type: String },
-    invoicePdf: { type: String },
+    invoicePdf: {
+        type: String,
+        default: ''
+    },
+    invoicePdfURL:{
+        type: String,
+        default: ''
+    },
     sentAt: { type: Date }
 }, { timestamps: true });
 

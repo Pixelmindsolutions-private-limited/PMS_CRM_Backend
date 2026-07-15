@@ -127,7 +127,8 @@ const uploadDirs = [
   path.join(__dirname, 'uploads/staff/idcards'),
   path.join(__dirname, 'uploads/staff/documents'),
   path.join(__dirname, 'uploads/temp'),
-  path.join(__dirname, 'uploads/fingerprints')
+  path.join(__dirname, 'uploads/fingerprints'),
+  path.join(__dirname, 'uploads/invoices')
 ];
 
 uploadDirs.forEach(dir => {
@@ -162,7 +163,20 @@ app.use('/uploads', (req, res, next) => {
 }));
 
 
+// ============ SERVE INVOICE PDFS (SPECIFIC) ============
+const invoicesPath = path.join(__dirname, 'uploads/invoices');
+console.log(`📁 Invoices directory: ${invoicesPath}`);
+console.log(`📁 Invoices exists: ${fs.existsSync(invoicesPath)}`);
 
+app.use('/uploads/invoices', express.static(invoicesPath, {
+  setHeaders: (res, filePath) => {
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cache-Control', 'public, max-age=31536000');
+  }
+}));
+
+console.log(`📁 Invoices static route configured`);
 
 
 // ==================== ROUTES ====================

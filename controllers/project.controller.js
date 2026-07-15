@@ -724,6 +724,8 @@
 
 
 // controllers/projectController.js
+const fs = require('fs');
+const path = require('path');
 const Project = require('../models/Project');
 const Client = require('../models/Client');
 const Staff = require('../models/Staff');
@@ -2058,7 +2060,7 @@ exports.getInstallments = async (req, res) => {
 exports.markAsPaid = async (req, res) => {
     try {
         const { id, installmentId } = req.params;
-        const { paymentMode, transactionId } = req.body;
+        const { paymentMode, transactionId, applyGst } = req.body;  
 
         const project = await Project.findById(id).populate('clientId');
         if (!project) {
@@ -2100,7 +2102,11 @@ exports.markAsPaid = async (req, res) => {
                 amount = installment.value;
             }
 
-            const tax = amount * 0.18;
+            // ============ GST BASED ON BOOLEAN FLAG ============
+            // Get tax rate from .env (default 18)
+            const taxRate = parseFloat(process.env.TAX_RATE) || 18; 
+            const shouldApplyGst = applyGst === true;
+            const tax = shouldApplyGst ? (amount * taxRate) / 100 : 0;
             const totalAmount = amount + tax;
 
             // Create invoice
@@ -2123,6 +2129,28 @@ exports.markAsPaid = async (req, res) => {
 
             // ============ GENERATE PDF ============
             pdfBuffer = await generatePDFReceipt(invoice, project, project.clientId);
+
+            // ============ SAVE PDF TO DISK ============
+            const pdfFileName = `invoice-${invoice.invoiceNumber}.pdf`;
+            
+            const invoicesDir = path.join(__dirname, '../uploads/invoices');
+            if (!fs.existsSync(invoicesDir)) {
+                fs.mkdirSync(invoicesDir, { recursive: true });
+            }
+
+            const pdfPath = path.join(invoicesDir, pdfFileName);
+            fs.writeFileSync(pdfPath, pdfBuffer);
+            
+            const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
+            const pdfUrl = `${baseUrl}/uploads/invoices/${pdfFileName}`;
+
+            // ============ UPDATE INVOICE WITH PDF PATHS ============
+            invoice.invoicePdf = pdfPath;
+            invoice.invoicePdfURL = pdfUrl;
+            await invoice.save();
+
+            console.log(`✅ PDF saved: ${pdfPath}`);
+            console.log(`✅ PDF URL: ${pdfUrl}`);
 
             // ============ SEND EMAIL ============
             const client = project.clientId;
@@ -2175,10 +2203,14 @@ exports.markAsPaid = async (req, res) => {
                     _id: invoice._id,
                     invoiceNumber: invoice.invoiceNumber,
                     amount: invoice.amount,
+                    tax: invoice.tax,
                     totalAmount: invoice.totalAmount,
                     status: invoice.status,
                     paymentDate: invoice.paymentDate,
-                    transactionId: invoice.transactionId
+                    transactionId: invoice.transactionId,
+                    invoicePdf: invoice.invoicePdf,
+                    invoicePdfURL: invoice.invoicePdfURL,
+                    gstApplied: applyGst === true
                 } : null
             }
         });
@@ -2190,7 +2222,6 @@ exports.markAsPaid = async (req, res) => {
         });
     }
 };
-
 // Email Template
 function getInvoiceEmailHTML(client, project, invoice) {
     return `
