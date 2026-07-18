@@ -112,20 +112,7 @@ exports.assignStaffPermissions = async (req, res) => {
         const staffAccess = new StaffAccess({
             staffId: staff._id,
             employeeId: staff.employeeId,
-            modulePermissions: modulePermissions || {
-                dashboard: true,
-                staffManagement: false,
-                projects: false,
-                clients: false,
-                payments: false,
-                invoices: false,
-                reminders: false,
-                reports: false,
-                settings: false,
-                attendance: true,
-                installments: false,
-                worksheets: false
-            },
+            modulePermissions: modulePermissions || [],
             allowedProjects: allowedProjects || [],
             isAllProjectsAllowed: isAllProjectsAllowed || false,
             isReadOnly: isReadOnly || false,
@@ -149,7 +136,6 @@ exports.assignStaffPermissions = async (req, res) => {
                 allowedProjects: staffAccess.allowedProjects,
                 isAllProjectsAllowed: staffAccess.isAllProjectsAllowed,
                 isReadOnly: staffAccess.isReadOnly,
-                accessibleModules: staffAccess.getAccessibleModules()
             }
         });
     } catch (error) {
@@ -246,6 +232,10 @@ exports.updateStaffPermissions = async (req, res) => {
         if (isAllProjectsAllowed !== undefined) staffAccess.isAllProjectsAllowed = isAllProjectsAllowed;
         if (isLoginAllowed !== undefined) staffAccess.isLoginAllowed = isLoginAllowed;
 
+        if (modulePermissions && Array.isArray(modulePermissions)) {
+            staffAccess.modulePermissions = modulePermissions;  
+        }
+
         await staffAccess.save();
 
         res.json({
@@ -264,7 +254,6 @@ exports.updateStaffPermissions = async (req, res) => {
                 isAllProjectsAllowed: staffAccess.isAllProjectsAllowed,
                 isReadOnly: staffAccess.isReadOnly,
                 isLoginAllowed: staffAccess.isLoginAllowed,
-                accessibleModules: staffAccess.getAccessibleModules()
             }
         });
     } catch (error) {
@@ -439,8 +428,8 @@ exports.getAdminStaffProfile = async (req, res) => {
                 profileImage: staff.profileImage,
                 isAdminPanelAccess: staff.isAdminPanelAccess,
                 hasAdminPanelPassword: !!staff.adminPanelPassword,
-                modulePermissions: staffAccess?.modulePermissions || {},
-                accessibleModules: staffAccess?.getAccessibleModules() || [],
+                modulePermissions: staffAccess?.modulePermissions || [],
+                accessibleModules: staffAccess?.getAccessibleModules() || {},
                 isAllProjectsAllowed: staffAccess?.isAllProjectsAllowed || false,
                 allowedProjects: staffAccess?.allowedProjects || [],
                 isReadOnly: staffAccess?.isReadOnly || false
@@ -479,8 +468,8 @@ exports.getAllAdminStaff = async (req, res) => {
                 isAdminPanelAccess: s.isAdminPanelAccess || false,
                 hasAdminPanelPassword: !!s.adminPanelPassword,
                 adminEmail: s.adminEmail || s.email,
-                modulePermissions: access?.modulePermissions || {},
-                accessibleModules: access?.getAccessibleModules() || [],
+                modulePermissions: access?.modulePermissions || [],
+                accessibleModules: access?.getAccessibleModules() || {},
                 isAllProjectsAllowed: access?.isAllProjectsAllowed || false,
                 allowedProjects: access?.allowedProjects || [],
                 isReadOnly: access?.isReadOnly || false,
@@ -532,8 +521,8 @@ exports.getStaffByEmployeeId = async (req, res) => {
                 hasAdminPanelPassword: !!staff.adminPanelPassword,
                 adminEmail: staff.adminEmail || staff.email,
                 hasAccess: !!staffAccess,
-                modulePermissions: staffAccess?.modulePermissions || {},
-                accessibleModules: staffAccess?.getAccessibleModules() || [],
+                modulePermissions: staffAccess?.modulePermissions || [],
+                accessibleModules: staffAccess?.getAccessibleModules() || {},
                 isAllProjectsAllowed: staffAccess?.isAllProjectsAllowed || false,
                 allowedProjects: staffAccess?.allowedProjects || [],
                 isReadOnly: staffAccess?.isReadOnly || false,

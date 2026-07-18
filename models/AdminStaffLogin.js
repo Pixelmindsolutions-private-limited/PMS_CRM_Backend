@@ -15,20 +15,38 @@ const staffAccessSchema = new mongoose.Schema({
     },
 
     // ============ MODULE PERMISSIONS ============
-    modulePermissions: {
-        dashboard: { type: Boolean, default: true },
-        staffManagement: { type: Boolean, default: false },
-        projects: { type: Boolean, default: false },
-        clients: { type: Boolean, default: false },
-        payments: { type: Boolean, default: false },
-        invoices: { type: Boolean, default: false },
-        reminders: { type: Boolean, default: false },
-        reports: { type: Boolean, default: false },
-        settings: { type: Boolean, default: false },
-        attendance: { type: Boolean, default: false },
-        installments: { type: Boolean, default: false },
-        worksheets: { type: Boolean, default: false }
-    },
+    // modulePermissions: {
+    //     dashboard: { type: Boolean, default: true },
+    //     staffManagement: { type: Boolean, default: false },
+    //     projects: { type: Boolean, default: false },
+    //     clients: { type: Boolean, default: false },
+    //     payments: { type: Boolean, default: false },
+    //     invoices: { type: Boolean, default: false },
+    //     reminders: { type: Boolean, default: false },
+    //     reports: { type: Boolean, default: false },
+    //     settings: { type: Boolean, default: false },
+    //     attendance: { type: Boolean, default: false },
+    //     installments: { type: Boolean, default: false },
+    //     worksheets: { type: Boolean, default: false }
+    // },
+
+
+    modulePermissions: [{
+        component: {
+            type: String,
+            required: true
+        },
+        items: [{
+            name: {
+                type: String,
+                required: true
+            },
+            permission: [{
+                type: String,
+                default: ['view']
+            }]
+        }]
+    }],
 
     // ============ PROJECT ACCESS ============
     allowedProjects: [{

@@ -3,10 +3,55 @@ const { Staff } = require('../models/Staff');
 
 const activeBreaks = new Map();
 
-// Helper function to format time
-const formatTime = (date) => {
+// ============ IST HELPERS ============
+
+// Get current IST time
+const getISTTime = () => {
+  const now = new Date();
+  return new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+};
+
+// Get IST date (start of day)
+const getISTDate = () => {
+  const ist = getISTTime();
+  ist.setHours(0, 0, 0, 0);
+  return ist;
+};
+
+// Format time in IST
+const formatTimeIST = (date) => {
   if (!date) return null;
-  return new Date(date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  return new Date(date).toLocaleTimeString('en-IN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Kolkata'
+  });
+};
+
+// Format date in IST
+const formatDateIST = (date) => {
+  if (!date) return null;
+  return new Date(date).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Kolkata'
+  });
+};
+
+// Format datetime in IST
+const formatDateTimeIST = (date) => {
+  if (!date) return null;
+  return new Date(date).toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Kolkata'
+  });
 };
 
 // DEVELOPMENT MODE FLAG - Set to false for production
@@ -14,8 +59,7 @@ const DEVELOPMENT_MODE = true;
 
 // Helper function to check for existing active session
 const checkExistingActiveSession = async (employeeId, excludeSessionId = null) => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = getISTDate();
   
   let query = {
     employeeId,
@@ -74,10 +118,9 @@ const startWork = async (req, res) => {
       });
     }
 
-    const today = new Date(); 
-    today.setHours(0, 0, 0, 0);
-    const now = new Date();
-    
+    const today = getISTDate();
+    const now = getISTTime();
+
     if (activeBreaks.has(employeeId)) activeBreaks.delete(employeeId);
 
     const session = new WorkSession({
@@ -94,7 +137,7 @@ const startWork = async (req, res) => {
         timestamp: now, 
         type: 'work_start', 
         details: notes || 'Work started',
-        formattedTime: formatTime(now)
+        formattedTime: formatTimeIST(now)
       }]
     });
     await session.save();
@@ -104,7 +147,8 @@ const startWork = async (req, res) => {
       message: "Work started successfully", 
       data: { 
         sessionId: session._id, 
-        startTime: session.startTime, 
+        startTimeIST: formatTimeIST(session.startTime),
+        dateIST: formatDateIST(session.date),
         status: session.status,
         totalWorkDuration: 0
       } 
@@ -137,16 +181,15 @@ const updateActivity = async (req, res) => {
           status: 'on_break', 
           breakRemaining: `${remainingMinutes} minutes`,
           breakType: breakInfo.breakType,
-          breakEndTime: breakInfo.breakEndTime,
+          breakEndTimeIST: formatTimeIST(breakInfo.breakEndTime),
           totalWorkDuration: session?.totalWorkDuration || 0,
           isWorkTimePaused: true
         } 
       });
     }
 
-    const today = new Date(); 
-    today.setHours(0, 0, 0, 0);
-    
+    const today = getISTDate();
+
     // Find active session
     const session = await WorkSession.findOne({ 
       employeeId, 
@@ -183,7 +226,7 @@ const updateActivity = async (req, res) => {
           type: 'idle_start', 
           details: 'User became idle - Work time paused',
           duration: 0,
-          formattedTime: formatTime(now)
+          formattedTime: formatTimeIST(now)
         });
         
         await session.save();
@@ -193,7 +236,7 @@ const updateActivity = async (req, res) => {
           message: "Work time paused - User idle", 
           data: { 
             status: 'idle', 
-            idleStartTime: now,
+            idleStartTimeIST: formatTimeIST(now),
             totalWorkDuration: session.totalWorkDuration,
             totalIdleTime: session.totalIdleTime || 0,
             totalBreakDuration: session.totalBreakDuration || 0,
@@ -305,7 +348,7 @@ const startBreak = async (req, res) => {
     }
 
     const breakDuration = breakType === 'lunch' ? 60 : 15;
-    const now = new Date();
+    const now = getISTTime();
     const breakEndTime = new Date(now.getTime() + breakDuration * 60000);
 
     // Calculate and save work time BEFORE break
@@ -322,7 +365,7 @@ const startBreak = async (req, res) => {
       breakType: breakType,
       breakDuration: breakDuration,
       expectedEndTime: breakEndTime,
-      formattedTime: formatTime(now)
+      formattedTime: formatTimeIST(now)
     });
     
     await session.save();
@@ -343,8 +386,8 @@ const startBreak = async (req, res) => {
       data: { 
         breakType, 
         breakDuration, 
-        breakEndTime,
-        breakStartTime: now,
+        breakEndTimeIST: formatTimeIST(breakEndTime),
+        breakStartTimeIST: formatTimeIST(now),
         totalWorkDuration: session.totalWorkDuration,
         isWorkTimePaused: true
       } 
@@ -610,7 +653,7 @@ const endWork = async (req, res) => {
     const session = await checkExistingActiveSession(employeeId);
     if (!session) return res.status(404).json({ success: false, message: "No active work session found" });
 
-    const now = new Date();
+    const now = getISTTime();
     const totalElapsed = (now - session.startTime) / (1000 * 60);
     const totalNonWork = (session.totalBreakDuration || 0) + (session.totalIdleTime || 0);
     
@@ -622,7 +665,7 @@ const endWork = async (req, res) => {
       timestamp: now,
       type: 'work_end',
       details: 'Work session ended',
-      formattedTime: formatTime(now),
+      formattedTime: formatTimeIST(now),
       totalWorkHours: ((session.totalWorkDuration || 0) / 60).toFixed(2)
     });
     
@@ -663,7 +706,7 @@ const getCurrentStatus = async (req, res) => {
       });
     }
     
-    const now = new Date();
+    const now = getISTTime();
     let currentWorkTime = 0;
     let isWorkTimePaused = false;
     
@@ -684,14 +727,15 @@ const getCurrentStatus = async (req, res) => {
       success: true,
       data: {
         status: session.status,
-        startTime: session.startTime,
+        startTimeIST: formatTimeIST(session.startTime),
         currentWorkTime: Math.round(currentWorkTime),
         currentWorkHours: (currentWorkTime / 60).toFixed(2),
         totalIdleTime: Math.round(session.totalIdleTime || 0),
         totalBreakDuration: Math.round(session.totalBreakDuration || 0),
         isWorkTimePaused: isWorkTimePaused,
-        lastActiveTime: session.lastActiveTime,
-        idleStartTime: session.idleStartTime
+        lastActiveTimeIST: formatTimeIST(session.lastActiveTime),
+        idleStartTimeIST: formatTimeIST(session.idleStartTime),
+        currentTimeIST: formatDateTimeIST(now)
       }
     });
     
@@ -705,7 +749,7 @@ const getCurrentStatus = async (req, res) => {
 const getTodaySummary = async (req, res) => {
   try {
     const { employeeId } = req.params;
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const today = getISTDate();
     const session = await WorkSession.findOne({ employeeId, date: today });
     
     if (!session) {
@@ -724,7 +768,7 @@ const getTodaySummary = async (req, res) => {
     let totalWorkDuration = session.totalWorkDuration || 0;
     
     if (session.status !== 'completed') {
-      const now = new Date();
+      const now = getISTTime();
       const totalElapsed = (now - session.startTime) / (1000 * 60);
       const totalNonWork = (session.totalBreakDuration || 0) + (session.totalIdleTime || 0);
       totalWorkDuration = Math.max(0, totalElapsed - totalNonWork);
@@ -734,8 +778,9 @@ const getTodaySummary = async (req, res) => {
       success: true, 
       data: { 
         status: session.status, 
-        startTime: session.startTime, 
-        endTime: session.endTime, 
+        startTimeIST: formatTimeIST(session.startTime), 
+        endTimeIST: formatTimeIST(session.endTime), 
+        date: formatDateIST(session.date),
         totalWorkDuration: Math.round(totalWorkDuration), 
         totalWorkHours: (totalWorkDuration / 60).toFixed(2), 
         totalBreakDuration: Math.round(session.totalBreakDuration || 0), 
@@ -899,7 +944,7 @@ const getAllSessions = async (req, res) => {
 const getTodayTimeline = async (req, res) => {
   try {
     const { employeeId } = req.params;
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const today = getISTDate();
     const session = await WorkSession.findOne({ employeeId, date: today });
 
     if (!session) {
@@ -931,7 +976,7 @@ const getTodayTimeline = async (req, res) => {
         type: 'work_start',
         title: 'Punched In — Work Started',
         time: session.startTime,
-        formattedTime: formatTime(session.startTime),
+        formattedTime: formatTimeIST(session.startTime),
         location: 'Office',
         icon: '💼'
       });
