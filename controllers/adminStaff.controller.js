@@ -123,7 +123,7 @@ exports.assignStaffPermissions = async (req, res) => {
                 reports: false,
                 settings: false,
                 attendance: true,
-                digitalMarketing: false,
+                installments: false,
                 worksheets: false
             },
             allowedProjects: allowedProjects || [],
@@ -322,6 +322,7 @@ exports.adminStaffLogin = async (req, res) => {
                 { adminEmail: email.toLowerCase() }
             ]
         });
+        
 
         if (!staff) {
             return res.status(401).json({

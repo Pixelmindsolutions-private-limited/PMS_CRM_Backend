@@ -26,7 +26,7 @@ const staffAccessSchema = new mongoose.Schema({
         reports: { type: Boolean, default: false },
         settings: { type: Boolean, default: false },
         attendance: { type: Boolean, default: false },
-        digitalMarketing: { type: Boolean, default: false },
+        installments: { type: Boolean, default: false },
         worksheets: { type: Boolean, default: false }
     },
 
