@@ -650,3 +650,72 @@ exports.adminStaffLogout = (req, res) => {
         message: 'Logged out successfully'
     });
 };
+
+
+exports.deleteStaffAccess = async (req, res) => {
+    try {
+        const { staffIds } = req.body;
+
+        if (!staffIds?.length) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide staffIds array'
+            });
+        }
+
+        const uniqueStaffIds = [...new Set(staffIds)];
+        const success = [];
+        const failed = [];
+
+        for (const staffId of uniqueStaffIds) {
+            try {
+                const staff = await Staff.findById(staffId);
+                if (!staff) {
+                    failed.push({ staffId, reason: 'Staff not found' });
+                    continue;
+                }
+
+                const staffAccess = await StaffAccess.findOneAndDelete({ staffId: staff._id });
+                if (!staffAccess) {
+                    failed.push({ staffId, employeeId: staff.employeeId, reason: 'Access record not found' });
+                    continue;
+                }
+
+                await Staff.findByIdAndUpdate(staffId, {
+                    isAdminPanelAccess: false,
+                    adminEmail: null,
+                    adminPanelPassword: null
+                });
+
+                success.push({
+                    staffId: staff._id,
+                    employeeId: staff.employeeId,
+                    employeeName: staff.employeeName
+                });
+
+            } catch (error) {
+                failed.push({ staffId, reason: error.message });
+            }
+        }
+
+        res.json({
+            success: failed.length === 0,
+            message: uniqueStaffIds.length === 1
+                ? (failed.length === 0 ? `Access removed for ${success[0]?.employeeName}` : 'Failed to remove access')
+                : `Removed access for ${success.length} of ${uniqueStaffIds.length} staff`,
+            data: {
+                total: uniqueStaffIds.length,
+                success: success.length,
+                failed: failed.length,
+                successList: success,
+                failedList: failed
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};

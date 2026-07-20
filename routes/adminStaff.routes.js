@@ -14,7 +14,8 @@ const {
     getStaffByEmployeeId,
     assignStaffPermissions,
     updateStaffPermissions,
-    getAllProjectsList
+    getAllProjectsList,
+    deleteStaffAccess
 } = require('../controllers/adminStaff.controller');
 
 // ============ PERMISSION MIDDLEWARE ============
@@ -103,5 +104,7 @@ router.get('/', getAllAdminStaff);
 router.put('/:id/toggle-login', toggleAdminStaffLogin);
 
 router.get('/projectslist', getAllProjectsList);
+router.delete('/delete', deleteStaffAccess);
+
 
 module.exports = router;
