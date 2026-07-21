@@ -16,8 +16,10 @@ router.get('/stats', attendanceController.getAttendanceStats);
 router.get('/', attendanceController.getAllAttendance);
 router.get('/staff/:staffId', attendanceController.getAttendanceByStaff);
 router.post('/', attendanceController.createAttendance);
+router.get('/employee/:staffId/complete', attendanceController.getCompleteEmployeeAttendance);
 router.post('/bulk', attendanceController.bulkCreateAttendance);
 router.put('/:id', attendanceController.updateAttendance);
 router.delete('/:id', attendanceController.deleteAttendance);
+
 
 module.exports = router;

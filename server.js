@@ -191,6 +191,7 @@ const fingerprintRoutes = require('./routes/fingerprint.routes');
 const workSessionRoutes = require('./routes/WorkSession.routes');
 const digitalMarketingRoutes = require('./routes/marketing.routes');
 const adminStaffLogin = require('./routes/adminStaff.routes');
+const manualInvoiceRoutes = require('./routes/manualinvoice.routes');
 
 // Mount API routes
 app.use('/api/auth', authRoutes);
@@ -204,7 +205,7 @@ app.use('/api/fingerprint', fingerprintRoutes);
 app.use('/api/work-session', workSessionRoutes);
 app.use('/api/digitalmarketing', digitalMarketingRoutes);
 app.use('/api/admin-staff', adminStaffLogin);
-
+app.use('/api/manual-invoices', manualInvoiceRoutes);
 
 
 const startReminderJob = require('./cron/installmentReminder');
