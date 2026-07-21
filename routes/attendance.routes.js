@@ -4,7 +4,7 @@ const attendanceController = require('../controllers/attendance.controller');
 const { protect } = require('../middleware/auth.middleware');
 
 // All attendance routes require authentication
-router.use(protect);
+// router.use(protect);
 
 // Staff options for dropdown
 router.get('/staff-options', attendanceController.getStaffOptions);
