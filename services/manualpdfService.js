@@ -6,7 +6,7 @@ const path = require('path');
 // ============ LOGO LOADER ============
 async function getLogoSrc() {
     const candidatePaths = [
-        path.join(__dirname, '../uploads/logo.png'),
+        path.join(__dirname, '../uploads/image (18).png'),
         path.join(__dirname, '../uploads/image (18).png'),
         path.join(__dirname, '../uploads', 'image (18).png'),
         path.join(process.cwd(), 'uploads/image (18).png'),
@@ -383,8 +383,8 @@ async function buildManualInvoiceHTML(invoice) {
 
             <div class="totals">
               <table>
-                <tr><td class="label">TOTAL</td><td class="value">${fmt(invoice.subtotal)}</td></tr>
-                <tr class="subtotal"><td class="label">SUB TOTAL</td><td class="value">${fmt(invoice.totalAmount)}</td></tr>
+                <tr class="subtotal"><td class="label">SUB TOTAL</td><td class="value">${fmt(invoice.subtotal)}</td></tr>
+                <tr><td class="label">TOTAL</td><td class="value">${fmt(invoice.totalAmount)}</td></tr>
               </table>
             </div>
 
@@ -435,16 +435,45 @@ async function buildManualInvoiceHTML(invoice) {
 const generateManualInvoicePDF = async (invoice) => {
     const html = await buildManualInvoiceHTML(invoice);
 
-    const browser = await puppeteer.launch({
+    // Try to find Chrome on system
+    const chromePaths = [
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium'
+    ];
+
+    let executablePath = null;
+    for (const path of chromePaths) {
+        if (fs.existsSync(path)) {
+            executablePath = path;
+            console.log(`✅ Found Chrome at: ${executablePath}`);
+            break;
+        }
+    }
+
+    // Launch with system Chrome if found, otherwise let puppeteer try
+    const launchOptions = {
         headless: 'new',
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-accelerated-2d-canvas',
-            '--disable-gpu'
+            '--disable-gpu',
+            '--disable-software-rasterizer'
         ]
-    });
+    };
+
+    // Add executablePath only if Chrome was found
+    if (executablePath) {
+        launchOptions.executablePath = executablePath;
+        console.log('🚀 Using system Chrome');
+    } else {
+        console.warn('⚠️ System Chrome not found, using Puppeteer default');
+    }
+
+    const browser = await puppeteer.launch(launchOptions);
 
     try {
         const page = await browser.newPage();

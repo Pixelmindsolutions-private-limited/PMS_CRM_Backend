@@ -77,8 +77,9 @@ exports.createManualInvoice = async (req, res) => {
             fs.mkdirSync(invoicesDir, { recursive: true });
         }
 
-        const pdfFileName = `manual-invoice-${invoice.invoiceNumber}.pdf`;
+        const pdfFileName = `manual-invoice-${invoice._id}.pdf`;
         const pdfPath = path.join(invoicesDir, pdfFileName);
+
         fs.writeFileSync(pdfPath, pdfBuffer);
 
         // Generate URL
@@ -229,29 +230,64 @@ exports.updateManualInvoice = async (req, res) => {
             });
         }
 
-        // Update fields
+        // ============ UPDATE CLIENT DETAILS ============
         if (clientName) invoice.clientName = clientName;
         if (clientMobile) invoice.clientMobile = clientMobile;
         if (clientAddress !== undefined) invoice.clientAddress = clientAddress;
         if (date) invoice.date = date;
 
-        // Update items and recalculate
-        if (items && items.length > 0) {
-            invoice.items = items.map(item => ({
-                description: item.description,
-                price: item.price,
-                quantity: item.quantity,
-                total: item.price * item.quantity
-            }));
+        // ============ UPDATE ITEMS ============
+        if (items && Array.isArray(items) && items.length > 0) {
+            // Check if items have _id (update existing) or not (add new)
+            for (const updateItem of items) {
+                if (updateItem._id) {
+                    // Update existing item by _id
+                    const itemIndex = invoice.items.findIndex(
+                        item => item._id.toString() === updateItem._id
+                    );
 
-            const subtotal = invoice.items.reduce((sum, item) => sum + item.total, 0);
-            invoice.subtotal = subtotal;
-            invoice.totalAmount = subtotal;
+                    if (itemIndex === -1) {
+                        return res.status(404).json({
+                            success: false,
+                            message: `Item with ID ${updateItem._id} not found`
+                        });
+                    }
+
+                    const existingItem = invoice.items[itemIndex];
+                    
+                    if (updateItem.description) existingItem.description = updateItem.description;
+                    if (updateItem.price !== undefined) existingItem.price = updateItem.price;
+                    if (updateItem.quantity !== undefined) existingItem.quantity = updateItem.quantity;
+                    
+                    // Recalculate total
+                    existingItem.total = existingItem.price * existingItem.quantity;
+                } else {
+                    // Add new item (no _id provided)
+                    if (!updateItem.description || !updateItem.price || !updateItem.quantity) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'New items must have description, price, and quantity'
+                        });
+                    }
+                    
+                    invoice.items.push({
+                        description: updateItem.description,
+                        price: updateItem.price,
+                        quantity: updateItem.quantity,
+                        total: updateItem.price * updateItem.quantity
+                    });
+                }
+            }
         }
+
+        // ============ RECALCULATE TOTALS ============
+        const subtotal = invoice.items.reduce((sum, item) => sum + item.total, 0);
+        invoice.subtotal = subtotal;
+        invoice.totalAmount = subtotal;
 
         await invoice.save();
 
-        // Regenerate PDF
+        // ============ REGENERATE PDF ============
         try {
             const pdfBuffer = await generateManualInvoicePDF(invoice);
             
@@ -260,7 +296,11 @@ exports.updateManualInvoice = async (req, res) => {
                 fs.mkdirSync(invoicesDir, { recursive: true });
             }
 
-            const pdfFileName = `manual-invoice-${invoice.invoiceNumber}.pdf`;
+            if (invoice.invoicePdf && fs.existsSync(invoice.invoicePdf)) {
+                fs.unlinkSync(invoice.invoicePdf);
+            }
+
+            const pdfFileName = `manual-invoice-${invoice._id}.pdf`;
             const pdfPath = path.join(invoicesDir, pdfFileName);
             fs.writeFileSync(pdfPath, pdfBuffer);
 
