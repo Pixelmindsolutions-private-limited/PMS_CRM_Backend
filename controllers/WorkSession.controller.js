@@ -2277,6 +2277,112 @@ const getAllSessions = async (req, res) => {
   }
 };
 
+// @desc    Get all sessions for all employees (Admin)
+const getAllSessionsAdmin = async (req, res) => {
+  try {
+    const { limit = 100, page = 1, employeeId, startDate, endDate } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    // Build query
+    let query = {};
+    
+    // Filter by employeeId if provided
+    if (employeeId) {
+      query.employeeId = employeeId;
+    }
+    
+    // Filter by date range if provided
+    if (startDate && endDate) {
+      query.date = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+    
+    // Get total count
+    const total = await WorkSession.countDocuments(query);
+    
+    // Get sessions with pagination
+    const sessions = await WorkSession.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // Calculate overall statistics
+    const stats = sessions.reduce((acc, s) => {
+      acc.totalWorkMinutes += (s.totalWorkDuration || 0);
+      acc.totalBreakMinutes += (s.totalBreakDuration || 0);
+      acc.totalIdleMinutes += (s.totalIdleTime || 0);
+      return acc;
+    }, { totalWorkMinutes: 0, totalBreakMinutes: 0, totalIdleMinutes: 0 });
+
+    // Group by employee for employee-wise summary
+    const employeeWiseStats = {};
+    sessions.forEach(s => {
+      if (!employeeWiseStats[s.employeeId]) {
+        employeeWiseStats[s.employeeId] = {
+          employeeId: s.employeeId,
+          employeeName: s.employeeName || 'Unknown',
+          totalSessions: 0,
+          totalWorkMinutes: 0,
+          totalBreakMinutes: 0,
+          totalIdleMinutes: 0
+        };
+      }
+      employeeWiseStats[s.employeeId].totalSessions++;
+      employeeWiseStats[s.employeeId].totalWorkMinutes += (s.totalWorkDuration || 0);
+      employeeWiseStats[s.employeeId].totalBreakMinutes += (s.totalBreakDuration || 0);
+      employeeWiseStats[s.employeeId].totalIdleMinutes += (s.totalIdleTime || 0);
+    });
+
+    // Format sessions with IST times
+    const formattedSessions = sessions.map(s => ({
+      ...s.toObject(),
+      startTime: s.startTime,
+      startTimeIST: formatTimeIST(s.startTime),
+      endTime: s.endTime,
+      endTimeIST: s.endTime ? formatTimeIST(s.endTime) : null,
+      date: s.date,
+      dateIST: formatDateIST(s.date)
+    }));
+
+    // Format employee-wise stats
+    const employeeSummary = Object.values(employeeWiseStats).map(emp => ({
+      ...emp,
+      totalWorkHours: (emp.totalWorkMinutes / 60).toFixed(2),
+      totalBreakHours: (emp.totalBreakMinutes / 60).toFixed(2),
+      totalIdleHours: (emp.totalIdleMinutes / 60).toFixed(2),
+      averageWorkHours: emp.totalSessions > 0 
+        ? ((emp.totalWorkMinutes / emp.totalSessions) / 60).toFixed(2) 
+        : '0.00'
+    }));
+
+    res.json({ 
+      success: true, 
+      data: { 
+        sessions: formattedSessions,
+        employeeSummary,
+        statistics: { 
+          totalSessions: total,
+          totalWorkHours: (stats.totalWorkMinutes / 60).toFixed(2), 
+          totalBreakHours: (stats.totalBreakMinutes / 60).toFixed(2), 
+          totalIdleHours: (stats.totalIdleMinutes / 60).toFixed(2),
+          totalEmployees: Object.keys(employeeWiseStats).length
+        },
+        pagination: { 
+          total, 
+          page: parseInt(page), 
+          limit: parseInt(limit), 
+          pages: Math.ceil(total / parseInt(limit)) 
+        }
+      } 
+    });
+  } catch (error) {
+    console.error('Get all sessions error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // @desc    Get today's timeline
 const getTodayTimeline = async (req, res) => {
   try {
@@ -2416,5 +2522,6 @@ module.exports = {
   getWorkHistory,
   getActiveEmployees,
   getAllSessions,
+  getAllSessionsAdmin,
   getTodayTimeline
 };
