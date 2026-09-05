@@ -61,7 +61,9 @@ const allowedOrigins = [
   'http://localhost:3001',
   'http://localhost:3002',
   'http://127.0.0.1:3000',
-  'http://31.97.228.17:3537'
+  'http://31.97.228.17:3537',
+  'http://31.97.228.17:4477',
+  'https://pmsadmin.pixelmindsolutions.com'
 ];
 
 // Apply CORS middleware
@@ -192,6 +194,7 @@ const workSessionRoutes = require('./routes/WorkSession.routes');
 const digitalMarketingRoutes = require('./routes/marketing.routes');
 const adminStaffLogin = require('./routes/adminStaff.routes');
 const manualInvoiceRoutes = require('./routes/manualinvoice.routes');
+const adminAuthRoutes = require('./routes/adminpannel.routes');  
 
 // Mount API routes
 app.use('/api/auth', authRoutes);
@@ -206,6 +209,7 @@ app.use('/api/work-session', workSessionRoutes);
 app.use('/api/digitalmarketing', digitalMarketingRoutes);
 app.use('/api/admin-staff', adminStaffLogin);
 app.use('/api/manual-invoices', manualInvoiceRoutes);
+app.use('/api/adminpanel', adminAuthRoutes);
 
 
 const startReminderJob = require('./cron/installmentReminder');
