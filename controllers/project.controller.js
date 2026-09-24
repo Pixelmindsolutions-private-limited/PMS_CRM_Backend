@@ -100,14 +100,14 @@
 //       });
 //     } catch (error) {
 //       console.error('Create project error:', error);
-      
+
 //       if (error.code === 11000) {
 //         return res.status(400).json({
 //           success: false,
 //           message: 'Project ID already exists. Please try again.'
 //         });
 //       }
-      
+
 //       res.status(500).json({
 //         success: false,
 //         message: error.message || 'Server error while creating project'
@@ -122,7 +122,7 @@
 // //     console.log('Full URL:', req.originalUrl);
 // //     console.log('Query params:', req.query);
 // //     console.log('Raw query string:', req.url);
-    
+
 // //     const { page = 1, limit = 10, search, category, status } = req.query;
 // //     console.log('Parsed values:', { page, limit, search, category, status });
 // //       const query = {};
@@ -178,7 +178,7 @@
 //   try {
 //     console.log('=== Getting ALL projects (no pagination) ===');
 //     console.log('Query params:', req.query);
-    
+
 //     const { search, category, status } = req.query;
 //     const query = {};
 
@@ -307,14 +307,14 @@
 //       });
 //     } catch (error) {
 //       console.error('Update project error:', error);
-      
+
 //       if (error.code === 11000) {
 //         return res.status(400).json({
 //           success: false,
 //           message: 'Duplicate field value'
 //         });
 //       }
-      
+
 //       res.status(500).json({
 //         success: false,
 //         message: error.message
@@ -415,7 +415,7 @@
 //       }
 
 //       if (updateData.amount) updateData.amount = Number(updateData.amount);
-      
+
 //       Object.keys(updateData).forEach(key => {
 //         if (key !== '_id') {
 //           milestone[key] = updateData[key];
@@ -821,34 +821,39 @@ const { generatePDFReceipt } = require('../services/pdfService');
 
 // @desc    Create new project
 // @route   POST /api/projects
+
 exports.createProject = async (req, res) => {
     try {
-        const { 
-            clientId, 
-            projectName, 
-            projectCost, 
-            projectStartDate, 
-            projectEndDate, 
-            deadline, 
-            paymentMilestone, 
-            category, 
-            workDivision, 
+        const {
+            clientId,
+            clientName,
+            mobileNumber,
+            mailId,
+            projectName,
+            projectCost,
+            projectStartDate,
+            projectEndDate,
+            deadline,
+            paymentMilestone,
+            category,
+            workDivision,
             teamAssignment,
-            digitalMarketing  // ← ADD THIS
+            digitalMarketing,
         } = req.body;
 
-        if (!clientId || !projectName) {
+        if (!projectName || !clientName || !mobileNumber || !mailId) {
             return res.status(400).json({
                 success: false,
-                message: 'Client ID and project name are required'
+                message: "Project name, client name, mobile number and mail id are required"
             });
         }
 
-        const client = await Client.findById(clientId);
-        if (!client) {
+        // Reuse an existing client record when supplied; manual client details work without a clientId.
+        const client = clientId ? await Client.findById(clientId) : null;
+        if (clientId && !client) {
             return res.status(404).json({
                 success: false,
-                message: 'Client not found'
+                message: 'Client not found',
             });
         }
 
@@ -858,60 +863,65 @@ exports.createProject = async (req, res) => {
 
         if (category === 'digital marketing' && digitalMarketing) {
             const DigitalMarketingPlan = require('../models/DigitalMarketingPlan');
-            
-            // Find the plan
+
             const plan = await DigitalMarketingPlan.findById(digitalMarketing.planId);
             if (!plan) {
                 return res.status(404).json({
                     success: false,
-                    message: 'Digital marketing plan not found'
+                    message: 'Digital marketing plan not found',
                 });
             }
 
-            // Find price for selected duration
-            const durationData = plan.durations.find(d => d.duration === digitalMarketing.duration);
+            const durationData = plan.durations.find(
+                (d) => d.duration === digitalMarketing.duration
+            );
             if (!durationData) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Invalid duration for this plan'
+                    message: 'Invalid duration for this plan',
                 });
             }
 
-            // Set project cost from plan
             finalProjectCost = durationData.price;
 
-            // Prepare digital marketing data
             digitalMarketingData = {
                 planId: plan._id,
                 planName: plan.planName,
                 duration: digitalMarketing.duration,
                 price: durationData.price,
-                features: plan.features || []
+                features: plan.features || [],
             };
         }
 
-        // ============ PREPARE WORK DIVISION ============
-        let workDivisionData = workDivision || { 
-            designing: 0, 
-            frontend: 0, 
-            backend: 0, 
-            testing: 0, 
+        // ============ WORK DIVISION ============
+        const workDivisionData = workDivision || {
+            designing: 0,
+            frontend: 0,
+            backend: 0,
+            testing: 0,
             deployment: 0,
-            marketing: 0 
+            marketing: 0,
         };
 
-        // ============ PREPARE TEAM ASSIGNMENT ============
-        let teamAssignmentData = teamAssignment || { 
-            designing: [], 
-            frontend: [], 
-            backend: [], 
-            testing: [], 
+        // ============ TEAM ASSIGNMENT ============
+        const teamAssignmentData = teamAssignment || {
+            designing: [],
+            frontend: [],
+            backend: [],
+            testing: [],
             deployment: [],
-            marketing: [] 
+            marketing: [],
         };
 
+        // ============ CREATE PROJECT ============
         const project = new Project({
-            clientId,
+            ...(client ? { clientId: client._id } : {}),
+
+            // ✅ Snapshot client fields
+            clientName: client?.name || clientName.trim(),
+            mobileNumber: client?.mobile || mobileNumber.trim(),
+            mailId: client?.email || mailId.trim(),
+
             projectName: projectName.trim(),
             projectCost: finalProjectCost,
             projectStartDate: projectStartDate || null,
@@ -921,11 +931,12 @@ exports.createProject = async (req, res) => {
             category: category || 'website',
             workDivision: workDivisionData,
             teamAssignment: teamAssignmentData,
-            digitalMarketing: digitalMarketingData  // ← ADD THIS
+            digitalMarketing: digitalMarketingData,
         });
 
         await project.save();
 
+        // ============ POPULATE ============
         const populatedProject = await Project.findById(project._id)
             .populate('clientId', 'name email mobile address')
             .select('-__v');
@@ -937,6 +948,12 @@ exports.createProject = async (req, res) => {
                 _id: populatedProject._id,
                 projectId: populatedProject.projectId,
                 projectName: populatedProject.projectName,
+
+                // ✅ Snapshot fields
+                clientName: populatedProject.clientName,
+                mobileNumber: populatedProject.mobileNumber,
+                mailId: populatedProject.mailId,
+
                 projectCost: populatedProject.projectCost,
                 projectStartDate: populatedProject.projectStartDate,
                 projectEndDate: populatedProject.projectEndDate,
@@ -945,46 +962,49 @@ exports.createProject = async (req, res) => {
                 category: populatedProject.category,
                 workDivision: populatedProject.workDivision,
                 teamAssignment: populatedProject.teamAssignment,
-                digitalMarketing: populatedProject.digitalMarketing || null,  // ← ADD THIS
-                client: {
-                    _id: populatedProject.clientId._id,
-                    name: populatedProject.clientId.name,
-                    mobile: populatedProject.clientId.mobile,
-                    email: populatedProject.clientId.email,
-                    address: populatedProject.clientId.address
-                },
+                digitalMarketing: populatedProject.digitalMarketing || null,
+
+                client: populatedProject.clientId
+                    ? {
+                        _id: populatedProject.clientId._id,
+                        name: populatedProject.clientId.name,
+                        mobile: populatedProject.clientId.mobile,
+                        email: populatedProject.clientId.email,
+                        address: populatedProject.clientId.address,
+                    }
+                    : null,
+
                 status: 'active',
                 createdAt: populatedProject.createdAt,
-                updatedAt: populatedProject.updatedAt
-            }
+                updatedAt: populatedProject.updatedAt,
+            },
         });
     } catch (error) {
         console.error('Create project error:', error);
         if (error.code === 11000) {
             return res.status(400).json({
                 success: false,
-                message: 'Duplicate value found. Please try again.'
+                message: 'Duplicate value found. Please try again.',
             });
         }
         res.status(500).json({
             success: false,
-            message: error.message || 'Server error while creating project'
+            message: error.message || 'Server error while creating project',
         });
     }
 };
-
 // ==================== READ ====================
 
 // @desc    Get all projects with pagination and filters
 // @route   GET /api/projects
 exports.getAllProjects = async (req, res) => {
     try {
-        const { 
-            page = 1, 
-            limit = 10, 
-            search, 
-            category, 
-            clientId, 
+        const {
+            page = 1,
+            limit = 10,
+            search,
+            category,
+            clientId,
             isDeleted,
             projectId,
             projectName,
@@ -1053,20 +1073,20 @@ exports.getAllProjects = async (req, res) => {
         // Filter by client fields (clientName, clientEmail, clientMobile) - post-filtering
         let filteredProjects = projects;
         if (clientName) {
-            filteredProjects = filteredProjects.filter(project => 
-                project.clientId && project.clientId.name && 
+            filteredProjects = filteredProjects.filter(project =>
+                project.clientId && project.clientId.name &&
                 project.clientId.name.toLowerCase().includes(clientName.toLowerCase())
             );
         }
         if (clientEmail) {
-            filteredProjects = filteredProjects.filter(project => 
-                project.clientId && project.clientId.email && 
+            filteredProjects = filteredProjects.filter(project =>
+                project.clientId && project.clientId.email &&
                 project.clientId.email.toLowerCase().includes(clientEmail.toLowerCase())
             );
         }
         if (clientMobile) {
-            filteredProjects = filteredProjects.filter(project => 
-                project.clientId && project.clientId.mobile && 
+            filteredProjects = filteredProjects.filter(project =>
+                project.clientId && project.clientId.mobile &&
                 project.clientId.mobile.includes(clientMobile)
             );
         }
@@ -1079,7 +1099,7 @@ exports.getAllProjects = async (req, res) => {
             total = filteredProjects.length;
         }
 
-        console.log(filteredProjects );
+        console.log(filteredProjects);
 
         const formattedProjects = filteredProjects.map(project => ({
             _id: project._id,
@@ -1318,7 +1338,7 @@ exports.updateProject = async (req, res) => {
             };
         }
 
-         // Handle digitalMarketing update
+        // Handle digitalMarketing update
         if (updateData.digitalMarketing) {
             // If updating digital marketing, validate plan and duration
             const { planId, duration } = updateData.digitalMarketing;
@@ -1358,7 +1378,7 @@ exports.updateProject = async (req, res) => {
             updateData,
             { new: true, runValidators: true }
         ).populate('clientId', 'name email mobile address')
-          .select('-__v');
+            .select('-__v');
 
         res.json({
             success: true,
@@ -1483,7 +1503,7 @@ exports.bulkDeleteProjects = async (req, res) => {
 exports.restoreProject = async (req, res) => {
     try {
         const { id } = req.params;
-        
+
         const project = await Project.findById(id);
         if (!project) {
             return res.status(404).json({
@@ -1535,7 +1555,7 @@ exports.permanentDeleteProjects = async (req, res) => {
         if (projectIds && Array.isArray(projectIds) && projectIds.length > 0) {
             // Validate each ID format
             const invalidIds = projectIds.filter(id => !ObjectId.isValid(id));
-            
+
             if (invalidIds.length > 0) {
                 return res.status(400).json({
                     success: false,
@@ -1815,7 +1835,7 @@ exports.getInstallments = async (req, res) => {
         const totalInstallments = project.installments.length;
         const paidInstallments = project.installments.filter(i => i.status === 'paid').length;
         const pendingInstallments = project.installments.filter(i => i.status === 'pending').length;
-        const overdueInstallments = project.installments.filter(i => 
+        const overdueInstallments = project.installments.filter(i =>
             i.status === 'pending' && i.dueDate && new Date(i.dueDate) < new Date()
         ).length;
 
@@ -1946,7 +1966,7 @@ exports.getInstallments = async (req, res) => {
 //                         <div>Invoice #: ${invoice.invoiceNumber}</div>
 //                         <div>Date: ${new Date().toLocaleDateString()}</div>
 //                     </div>
-                    
+
 //                     <div class="details">
 //                         <div class="row">
 //                             <div>
@@ -2060,7 +2080,7 @@ exports.getInstallments = async (req, res) => {
 exports.markAsPaid = async (req, res) => {
     try {
         const { id, installmentId } = req.params;
-        const { paymentMode, transactionId, applyGst } = req.body;  
+        const { paymentMode, transactionId, applyGst } = req.body;
 
         const project = await Project.findById(id).populate('clientId');
         if (!project) {
@@ -2104,7 +2124,7 @@ exports.markAsPaid = async (req, res) => {
 
             // ============ GST BASED ON BOOLEAN FLAG ============
             // Get tax rate from .env (default 18)
-            const taxRate = parseFloat(process.env.TAX_RATE) || 18; 
+            const taxRate = parseFloat(process.env.TAX_RATE) || 18;
             const shouldApplyGst = applyGst === true;
             const tax = shouldApplyGst ? (amount * taxRate) / 100 : 0;
             const totalAmount = amount + tax;
@@ -2132,7 +2152,7 @@ exports.markAsPaid = async (req, res) => {
 
             // ============ SAVE PDF TO DISK ============
             const pdfFileName = `invoice-${invoice.invoiceNumber}.pdf`;
-            
+
             const invoicesDir = path.join(__dirname, '../uploads/invoices');
             if (!fs.existsSync(invoicesDir)) {
                 fs.mkdirSync(invoicesDir, { recursive: true });
@@ -2140,7 +2160,7 @@ exports.markAsPaid = async (req, res) => {
 
             const pdfPath = path.join(invoicesDir, pdfFileName);
             fs.writeFileSync(pdfPath, pdfBuffer);
-            
+
             const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
             const pdfUrl = `${baseUrl}/uploads/invoices/${pdfFileName}`;
 
@@ -2408,7 +2428,7 @@ exports.sendReminders = async (req, res) => {
     try {
         console.log('🔄 Running installment reminder check (Manual)...');
         console.log(`⏰ Time: ${new Date().toLocaleString()}`);
-        
+
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
         tomorrow.setHours(0, 0, 0, 0);
@@ -2431,10 +2451,10 @@ exports.sendReminders = async (req, res) => {
         const reminderDetails = [];
 
         for (const project of projects) {
-            const dueInstallments = project.installments.filter(i => 
-                i.status === 'pending' && 
-                i.dueDate && 
-                new Date(i.dueDate).setHours(0,0,0,0) === tomorrow.getTime()
+            const dueInstallments = project.installments.filter(i =>
+                i.status === 'pending' &&
+                i.dueDate &&
+                new Date(i.dueDate).setHours(0, 0, 0, 0) === tomorrow.getTime()
             );
 
             console.log(`  📌 Project: ${project.projectName} - ${dueInstallments.length} due installments`);
@@ -2506,10 +2526,10 @@ exports.getUpcomingInstallments = async (req, res) => {
         const upcoming = [];
 
         for (const project of projects) {
-            const dueInstallments = project.installments.filter(i => 
-                i.status === 'pending' && 
-                i.dueDate && 
-                new Date(i.dueDate).setHours(0,0,0,0) === tomorrow.getTime()
+            const dueInstallments = project.installments.filter(i =>
+                i.status === 'pending' &&
+                i.dueDate &&
+                new Date(i.dueDate).setHours(0, 0, 0, 0) === tomorrow.getTime()
             );
 
             for (const installment of dueInstallments) {
@@ -2642,8 +2662,8 @@ exports.getReminderStats = async (req, res) => {
         const dueToday = await Project.aggregate([
             { $match: { isDeleted: false } },
             { $unwind: '$installments' },
-            { 
-                $match: { 
+            {
+                $match: {
                     'installments.status': 'pending',
                     'installments.dueDate': {
                         $gte: today,
@@ -2658,8 +2678,8 @@ exports.getReminderStats = async (req, res) => {
         const dueTomorrow = await Project.aggregate([
             { $match: { isDeleted: false } },
             { $unwind: '$installments' },
-            { 
-                $match: { 
+            {
+                $match: {
                     'installments.status': 'pending',
                     'installments.dueDate': {
                         $gte: tomorrow,
@@ -2674,8 +2694,8 @@ exports.getReminderStats = async (req, res) => {
         const overdue = await Project.aggregate([
             { $match: { isDeleted: false } },
             { $unwind: '$installments' },
-            { 
-                $match: { 
+            {
+                $match: {
                     'installments.status': 'pending',
                     'installments.dueDate': { $lt: today }
                 }
@@ -2708,13 +2728,13 @@ exports.getReminderStats = async (req, res) => {
 
 exports.getInvoices = async (req, res) => {
     try {
-        const { 
-            id, 
-            projectId, 
-            clientId, 
-            status, 
-            page = 1, 
-            limit = 10 
+        const {
+            id,
+            projectId,
+            clientId,
+            status,
+            page = 1,
+            limit = 10
         } = req.query;
 
         // ============ GET BY ID ============
@@ -2763,7 +2783,7 @@ exports.getInvoices = async (req, res) => {
             let message = 'No invoices found';
             if (projectId) message = 'No invoices found for this project';
             if (clientId) message = 'No invoices found for this client';
-            
+
             return res.status(404).json({
                 success: false,
                 message: message
@@ -2863,7 +2883,7 @@ exports.getTomorrowReminders = async (req, res) => {
             const dueInstallments = project.installments.filter(i => {
                 if (i.status !== 'pending') return false;
                 if (!i.dueDate) return false;
-                
+
                 // Compare date strings (YYYY-MM-DD)
                 const dueDateStr = new Date(i.dueDate).toISOString().split('T')[0];
                 return dueDateStr === tomorrowStr;
@@ -2944,12 +2964,12 @@ exports.debugReminders = async (req, res) => {
 
         for (const project of projects) {
             const pendingInstallments = project.installments.filter(i => i.status === 'pending');
-            
+
             console.log(`📌 Project: ${project.projectName} - ${pendingInstallments.length} pending installments`);
 
             for (const installment of pendingInstallments) {
                 result.totalPendingInstallments++;
-                
+
                 // Calculate amount
                 let amount = 0;
                 if (installment.type === 'percentage') {
@@ -2986,7 +3006,7 @@ exports.debugReminders = async (req, res) => {
             now.getUTCDate() + 1,
             0, 0, 0, 0
         ));
-        
+
         const tomorrowStr = tomorrow.toISOString();
         const tomorrowDate = tomorrow.toISOString().split('T')[0];
 

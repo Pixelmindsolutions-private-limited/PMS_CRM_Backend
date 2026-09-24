@@ -98,3 +98,38 @@ exports.deleteClient = async (req, res) => {
         res.status(400).json({ success: false, error: error.message });
     }
 };
+
+
+// ✅ Update lead (Running / Converted / Cancelled)
+exports.updateLeadStatus = async (req, res) => {
+  try {
+    const { lead } = req.body;
+    const allowed = ['Running', 'Converted', 'Cancelled'];
+
+    if (!allowed.includes(lead)) {
+      return res.status(400).json({
+        success: false,
+        message: `lead must be one of: ${allowed.join(', ')}`
+      });
+    }
+
+    const client = await Client.findByIdAndUpdate(
+      req.params.id,
+      { lead },
+      { new: true, runValidators: true }
+    );
+
+    if (!client) {
+      return res.status(404).json({ success: false, message: 'Client not found' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Client marked as ${lead}`,
+      data: client
+    });
+  } catch (error) {
+    console.error('updateLeadStatus error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

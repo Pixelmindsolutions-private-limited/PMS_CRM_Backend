@@ -171,23 +171,23 @@ const mongoose = require('mongoose');
 
 // ============ INSTALLMENT SCHEMA ============
 const installmentSchema = new mongoose.Schema({
-    title: { 
-        type: String, 
-        required: true 
+    title: {
+        type: String,
+        required: true
     },
-    type: { 
-        type: String, 
-        enum: ['amount', 'percentage'], 
-        required: true 
+    type: {
+        type: String,
+        enum: ['amount', 'percentage'],
+        required: true
     },
-    value: { 
-        type: Number, 
+    value: {
+        type: Number,
         required: true,
         min: 0
     },
-    dueDate: { 
-        type: Date, 
-        default: null 
+    dueDate: {
+        type: Date,
+        default: null
     },
     status: {
         type: String,
@@ -239,15 +239,21 @@ const digitalMarketingSchema = new mongoose.Schema({
 }, { _id: false });
 
 const projectSchema = new mongoose.Schema({
-    projectId: { 
-        type: String, 
-        unique: true 
+    projectId: {
+        type: String,
+        unique: true
     },
-    clientId: { 
-        type: mongoose.Schema.Types.ObjectId, 
+    clientId: {
+        type: mongoose.Schema.Types.ObjectId,
         ref: 'Client',
-        required: true 
+        required: false
     },
+
+    // ✅ SNAPSHOT FIELDS — client info at project creation time
+    clientName: { type: String, default: '' },
+    mobileNumber: { type: String, default: '' },
+    mailId: { type: String, default: '' },
+
     projectName: { type: String, required: true },
     projectCost: { type: Number, default: 0 },
     projectStartDate: Date,
@@ -259,9 +265,9 @@ const projectSchema = new mongoose.Schema({
         enum: ['mobile app', 'website', 'software', 'digital marketing'],
         default: 'website'
     },
-    workDivision: { 
-        type: workDivisionSchema, 
-        default: () => ({}) 
+    workDivision: {
+        type: workDivisionSchema,
+        default: () => ({})
     },
     teamAssignment: {
         designing: { type: [teamMemberSchema], default: [] },
@@ -276,42 +282,42 @@ const projectSchema = new mongoose.Schema({
         default: null
     },
     // ============ INSTALLMENTS ============
-    installments: { 
-        type: [installmentSchema], 
-        default: [] 
+    installments: {
+        type: [installmentSchema],
+        default: []
     },
-    totalPaid: { 
-        type: Number, 
-        default: 0 
+    totalPaid: {
+        type: Number,
+        default: 0
     },
-    remainingAmount: { 
-        type: Number, 
-        default: 0 
+    remainingAmount: {
+        type: Number,
+        default: 0
     },
-    
+
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null }
 }, { timestamps: true });
 
 
 // Generate sequential project ID (PMSPRJ0001, PMSPRJ0002, ...)
-projectSchema.statics.generateProjectId = async function() {
+projectSchema.statics.generateProjectId = async function () {
     try {
-        const lastProject = await this.findOne({ 
+        const lastProject = await this.findOne({
             projectId: { $regex: /^PMSPRJ/ }
         }).sort({ projectId: -1 });
-        
+
         let sequence = 1;
         if (lastProject) {
             const lastSeq = parseInt(lastProject.projectId.replace('PMSPRJ', ''));
             sequence = lastSeq + 1;
         }
-        
+
         const seqStr = String(sequence).padStart(4, '0');
         const projectId = `PMSPRJ${seqStr}`;
-        
+
         console.log(`✅ Generated projectId: ${projectId} (Sequence: ${sequence})`);
-        
+
         return projectId;
     } catch (error) {
         throw new Error(`Failed to generate project ID: ${error.message}`);
@@ -321,9 +327,9 @@ projectSchema.statics.generateProjectId = async function() {
 // ============ INSTANCE METHODS ============
 
 // Calculate payment summary
-projectSchema.methods.calculatePaymentSummary = function() {
+projectSchema.methods.calculatePaymentSummary = function () {
     let totalPaid = 0;
-    
+
     this.installments.forEach(installment => {
         if (installment.status === 'paid') {
             let amount = 0;
@@ -335,10 +341,10 @@ projectSchema.methods.calculatePaymentSummary = function() {
             totalPaid += amount;
         }
     });
-    
+
     this.totalPaid = totalPaid;
     this.remainingAmount = this.projectCost - totalPaid;
-    
+
     return {
         totalPaid: this.totalPaid,
         remainingAmount: this.remainingAmount
@@ -346,7 +352,7 @@ projectSchema.methods.calculatePaymentSummary = function() {
 };
 
 // Validate installments count against milestones
-projectSchema.methods.validateInstallments = function() {
+projectSchema.methods.validateInstallments = function () {
     if (this.installments.length > this.paymentMilestone) {
         throw new Error(`Cannot have more than ${this.paymentMilestone} installments`);
     }
@@ -355,19 +361,19 @@ projectSchema.methods.validateInstallments = function() {
 
 // ============ PRE-SAVE HOOK ============
 
-projectSchema.pre('save', async function(next) {
+projectSchema.pre('save', async function (next) {
     try {
         // Generate project ID
         if (!this.projectId) {
             this.projectId = await this.constructor.generateProjectId();
         }
-        
+
         // Calculate payment summary
         this.calculatePaymentSummary();
-        
+
         // Validate installments count
         this.validateInstallments();
-        
+
         next();
     } catch (error) {
         next(error);

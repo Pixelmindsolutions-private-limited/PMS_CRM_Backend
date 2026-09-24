@@ -6,7 +6,14 @@ const clientSchema = new mongoose.Schema({
     mobile: String,
     email: String,
     address: String,
-    lead: String
+    lead: String,
+
+    // ✅ NEW: Lead status with default "Running"
+    leadStatus: {
+        type: String,
+        enum: ['Running', 'Converted', 'Cancelled'],
+        default: 'Running'
+    }
 }, { timestamps: true });
 
 const Client = mongoose.model('Client', clientSchema);

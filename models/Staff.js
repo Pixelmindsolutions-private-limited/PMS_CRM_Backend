@@ -19,7 +19,7 @@ const staffDocumentSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });
 
-staffDocumentSchema.pre('save', async function(next) {
+staffDocumentSchema.pre('save', async function (next) {
   if (!this.documentId) {
     const timestamp = Date.now();
     const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
@@ -32,10 +32,30 @@ staffDocumentSchema.pre('save', async function(next) {
 const staffSchema = new mongoose.Schema({
   employeeId: { type: String, unique: true, required: true, trim: true },
   employeeName: { type: String, required: true, trim: true },
-  role: { type: String, required: true, enum: ['Admin', 'Manager', 'Staff', 'Full Stack Developer', 'Teacher', 'Accountant', 'Librarian', 'Other'], default: 'Staff' },
+  role: {
+    type: String, required: true, enum: [
+      "Admin",
+      "Manager",
+      "HR",
+      "Flutter Developer",
+      "Node.js Developer",
+      "React Developer",
+      "UI/UX Designer",
+      "Tester / Testing",
+      "Full-Stack Developer",
+      "Graphic Designer",
+      "Video Editor"
+    ], default: 'Staff'
+  },
   mobile: { type: String, required: true, match: [/^[0-9]{10}$/], unique: true },
   email: { type: String, required: true, unique: true, lowercase: true },
   joiningDate: { type: Date, required: true, default: Date.now },
+  gender: {
+    type: String,
+    required: true,
+    enum: ['Male', 'Female'],
+    default: 'Male'
+  },
   bloodGroup: { type: String, enum: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-', 'Unknown'], default: 'Unknown' },
   password: { type: String, required: true },
   adminEmail: { type: String, default: null, lowercase: true },
