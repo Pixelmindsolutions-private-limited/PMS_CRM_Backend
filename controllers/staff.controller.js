@@ -1312,10 +1312,13 @@ const getMetadata = async (req, res) => {
       "A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-", "Unknown"
     ];
 
+    const genders = ["Male", "Female"];
+
     res.status(200).json({
       success: true,
       roles: roles,
-      bloodGroups: bloodGroups
+      bloodGroups: bloodGroups,
+      genders: genders
     });
 
   } catch (error) {

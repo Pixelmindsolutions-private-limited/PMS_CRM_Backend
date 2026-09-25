@@ -2,10 +2,26 @@
 const Client = require('../models/Client');
 const Project = require('../models/Project');
 
+const normalizeLeadStatus = (value) => {
+    const raw = value === undefined || value === null ? '' : String(value).trim();
+    if (!raw) return 'Running';
+
+    const normalized = raw.toLowerCase();
+    if (['converted', 'conversion', 'converted lead', 'won', 'closed won'].includes(normalized)) {
+        return 'Converted';
+    }
+    if (['cancelled', 'canceled', 'cancel', 'rejected', 'lost', 'closed lost'].includes(normalized)) {
+        return 'Cancelled';
+    }
+    return 'Running';
+};
+
 // Create a new client
 exports.createClient = async (req, res) => {
     try {
-        const client = new Client(req.body);
+        const payload = { ...req.body };
+        payload.leadStatus = normalizeLeadStatus(payload.leadStatus ?? payload.status);
+        const client = new Client(payload);
         await client.save();
         res.status(201).json({ success: true, data: client });
     } catch (error) {
@@ -103,19 +119,20 @@ exports.deleteClient = async (req, res) => {
 // ✅ Update lead (Running / Converted / Cancelled)
 exports.updateLeadStatus = async (req, res) => {
   try {
-    const { lead } = req.body;
+    const incomingStatus = req.body.leadStatus ?? req.body.status ?? req.body.lead;
+    const leadStatus = normalizeLeadStatus(incomingStatus);
     const allowed = ['Running', 'Converted', 'Cancelled'];
 
-    if (!allowed.includes(lead)) {
+    if (!allowed.includes(leadStatus)) {
       return res.status(400).json({
         success: false,
-        message: `lead must be one of: ${allowed.join(', ')}`
+        message: `leadStatus must be one of: ${allowed.join(', ')}`
       });
     }
 
     const client = await Client.findByIdAndUpdate(
       req.params.id,
-      { lead },
+      { leadStatus },
       { new: true, runValidators: true }
     );
 
@@ -125,7 +142,7 @@ exports.updateLeadStatus = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: `Client marked as ${lead}`,
+      message: `Client marked as ${leadStatus}`,
       data: client
     });
   } catch (error) {

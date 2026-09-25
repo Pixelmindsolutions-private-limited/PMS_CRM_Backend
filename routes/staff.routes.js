@@ -88,6 +88,7 @@ router.patch('/:employeeId/toggle-status', toggleStaffStatus);
 
 // ==================== DOCUMENT ROUTES ====================
 router.post('/documents/upload/:employeeId', uploadDocuments.array('documents', 10), uploadDocumentsController);
+router.get('/documents/:employeeId', getDocumentsByEmployeeId);
 router.get('/documents/employee/:employeeId', getDocumentsByEmployeeId);
 router.get('/documents/batch/:batchId', getDocumentsByBatchId);
 router.get('/documents/type/:searchTerm', getDocumentsByType);
