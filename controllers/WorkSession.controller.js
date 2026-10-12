@@ -1,5 +1,6 @@
 // const WorkSession = require('../models/Worksession');
 // const { Staff } = require('../models/Staff');
+const WorkSchedule = require('../config/workSchedule');
 
 // const activeBreaks = new Map();
 
@@ -55,7 +56,7 @@
 // };
 
 // // DEVELOPMENT MODE FLAG - Set to false for production
-// const DEVELOPMENT_MODE = true;
+// const DEVELOPMENT_MODE = process.env.NODE_ENV !== 'production' && process.env.WORK_SESSION_DEV_TEST_MODE === 'true';
 
 // // Helper function to check for existing active session
 // const checkExistingActiveSession = async (employeeId, excludeSessionId = null) => {
@@ -890,7 +891,7 @@
 //     }
     
 //     const activeSessions = await WorkSession.find(query)
-//       .select('employeeId employeeName startTime status lastActiveTime totalWorkDuration totalBreakDuration totalIdleTime')
+//       .select('employeeId employeeName startTime status lastActiveTime totalWorkDuration totalBreakDuration totalIdleTime currentBreak')
 //       .sort({ startTime: -1 });
 
 //     const activeEmployees = await Promise.all(
@@ -1306,6 +1307,9 @@ const getISTDateObject = () => {
   const now = new Date();
   return new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
 };
+const getISTDayRange=(date=new Date())=>{const p=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date).map(({type,value})=>[type,value]));const start=new Date(Date.UTC(+p.year,+p.month-1,+p.day)-330*60000);return{start,end:new Date(start.getTime()+86400000)};};
+const findTodaySession=(employeeId)=>{const{start,end}=getISTDayRange();return WorkSession.findOne({employeeId,date:{$gte:start,$lt:end}}).sort({startTime:-1});};
+
 
 // Format time in IST
 const formatTimeIST = (date) => {
@@ -1344,24 +1348,10 @@ const formatDateTimeIST = (date) => {
 };
 
 // DEVELOPMENT MODE FLAG - Set to false for production
-const DEVELOPMENT_MODE = true;
+const DEVELOPMENT_MODE = process.env.NODE_ENV !== 'production' && process.env.WORK_SESSION_DEV_TEST_MODE === 'true';
 
 // Helper function to check for existing active session
-const checkExistingActiveSession = async (employeeId, excludeSessionId = null) => {
-  const today = getISTDate();
-  
-  let query = {
-    employeeId,
-    date: today,
-    status: { $in: ['working', 'idle', 'on_break', 'idle_checking'] }
-  };
-  
-  if (excludeSessionId) {
-    query._id = { $ne: excludeSessionId };
-  }
-  
-  return await WorkSession.findOne(query);
-};
+const checkExistingActiveSession=async(employeeId,excludeSessionId=null)=>{const{start,end}=getISTDayRange();const q={employeeId,date:{$gte:start,$lt:end},status:{$in:['working','idle','on_break','idle_checking']}};if(excludeSessionId)q._id={$ne:excludeSessionId};return WorkSession.findOne(q);};
 
 // Helper function to calculate current work time
 const calculateCurrentWorkTime = (session, now = new Date()) => {
@@ -1377,74 +1367,7 @@ const calculateCurrentWorkTime = (session, now = new Date()) => {
 };
 
 // @desc    Start work session
-const startWork = async (req, res) => {
-  try {
-    const { employeeId, notes } = req.body;
-    if (!employeeId) return res.status(400).json({ success: false, message: "Employee ID is required" });
-
-    const staff = await Staff.findOne({ employeeId });
-    if (!staff) return res.status(404).json({ success: false, message: "Staff not found" });
-
-    const existingSession = await checkExistingActiveSession(employeeId);
-    
-    if (existingSession) {
-      return res.status(400).json({ 
-        success: false, 
-        message: DEVELOPMENT_MODE 
-          ? `Employee already has an active session started at ${formatTimeIST(existingSession.startTime)}. Please end that session before starting a new one.`
-          : "Employee already has an active session today. Only one session allowed per day.",
-        data: {
-          existingSessionId: existingSession._id,
-          startTime: existingSession.startTime, 
-          startTimeIST: formatTimeIST(existingSession.startTime),
-          dateIST: formatDateIST(existingSession.date),
-          status: existingSession.status
-        }
-      });
-    }
-
-    const today = getISTDate();
-    const now = new Date();
-
-    if (activeBreaks.has(employeeId)) activeBreaks.delete(employeeId);
-
-    const session = new WorkSession({
-      employeeId, 
-      employeeName: staff.employeeName, 
-      date: today,
-      startTime: now, 
-      status: 'working', 
-      lastActiveTime: now,
-      totalBreakDuration: 0,
-      totalIdleTime: 0,
-      totalWorkDuration: 0,
-      activityLogs: [{ 
-        timestamp: now, 
-        type: 'work_start', 
-        details: notes || 'Work started',
-        formattedTime: formatTimeIST(now)
-      }]
-    });
-    await session.save();
-
-    res.json({ 
-      success: true, 
-      message: "Work started successfully", 
-      data: { 
-        sessionId: session._id,
-        startTime: session.startTime, 
-        startTimeIST: formatTimeIST(session.startTime),
-        dateIST: formatDateIST(session.date),
-        status: session.status,
-        totalWorkDuration: 0
-      }
-    });
-  } catch (error) {
-    console.error('Start work error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
+const startWork=async(req,res)=>{try{const{employeeId,notes}=req.body,staff=await Staff.findOne({employeeId});if(!staff)return res.status(404).json({success:false,message:'Staff not found'});const existing=await findTodaySession(employeeId);if(existing)return res.json({success:true,message:'Existing work session restored',data:{sessionId:existing._id,startTime:existing.startTime,startTimeIST:formatTimeIST(existing.startTime),status:existing.status,currentBreak:existing.currentBreak,shouldShowStartReminder:false,existing:true}});const now=new Date(),{start:dayStart}=getISTDayRange(now),session=new WorkSession({employeeId,employeeName:staff.employeeName,date:dayStart,startTime:now,status:'working',lastActiveTime:now,activityLogs:[{timestamp:now,type:'work_start',details:notes||'Work started'}]});await session.save();return res.status(201).json({success:true,message:'Work started',data:{sessionId:session._id,startTime:now,status:session.status,existing:false}});}catch(e){if(e.code===11000){const x=await findTodaySession(req.body.employeeId);if(x)return res.json({success:true,message:'Existing work session restored',data:{sessionId:x._id,startTime:x.startTime,status:x.status,currentBreak:x.currentBreak,existing:true}});}return res.status(500).json({success:false,message:e.message});}};
 
 // @desc    Update activity (heartbeat)
 // const updateActivity = async (req, res) => {
@@ -1598,253 +1521,60 @@ const startWork = async (req, res) => {
 //   }
 // };
 
-const updateActivity = async (req, res) => {
-  try {
-    const { employeeId, isIdle } = req.body;
-    if (!employeeId) return res.status(400).json({ success: false, message: "Employee ID is required" });
-
-    // If on break, handle separately
-    if (activeBreaks.has(employeeId)) {
-      const breakInfo = activeBreaks.get(employeeId);
-      const remainingMinutes = Math.ceil((breakInfo.breakEndTime - new Date()) / 60000);
-      const session = await WorkSession.findById(breakInfo.sessionId);
-      if (session) { 
-        session.lastActiveTime = new Date(); 
-        await session.save(); 
-      }
-      return res.json({ 
-        success: true, 
-        message: `On ${breakInfo.breakType} break`, 
-        data: { 
-          status: 'on_break', 
-          breakRemaining: `${remainingMinutes} minutes`,
-          breakType: breakInfo.breakType,
-          breakEndTimeIST: formatTimeIST(breakInfo.breakEndTime),
-          totalWorkDuration: session?.totalWorkDuration || 0,
-          isWorkTimePaused: true
-        } 
-      });
-    }
-
-    const today = getISTDate();
-
-    // Find active session
-    const session = await WorkSession.findOne({ 
-      employeeId, 
-      date: today, 
-      status: { $in: ['working', 'idle', 'idle_checking'] } 
-    });
-    
-    if (!session) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "No active work session found. Please start work first." 
-      });
-    }
-
-    const now = new Date();
-
-    // ============================================
-    // CASE 1: USER IS IDLE - PAUSE WORK TIME & SAVE STATUS
-    // ============================================
-    if (isIdle === true || isIdle === 'true') {
-      if (session.status === 'working') {
-        // Calculate and save work time BEFORE becoming idle
-        const totalElapsed = (now - session.startTime) / (1000 * 60);
-        const totalNonWork = (session.totalBreakDuration || 0) + (session.totalIdleTime || 0);
-        session.totalWorkDuration = Math.max(0, totalElapsed - totalNonWork);
-        
-        // ⭐ FIX: Save idle status to database
-        session.status = 'idle';
-        session.idleStartTime = now;
-        session.lastActiveTime = now;
-        session.activityLogs.push({ 
-          timestamp: now, 
-          type: 'idle_start', 
-          details: 'User became idle - Work time paused - Status saved',
-          duration: 0,
-          formattedTime: formatTimeIST(now)
-        });
-        
-        // ⭐ SAVE TO DATABASE
-        await session.save();
-        
-        return res.json({ 
-          success: true, 
-          message: "Work time paused - User idle", 
-          data: { 
-            status: 'idle',  // ✅ Now saved in database
-            startTime: session.startTime,
-            startTimeIST: formatTimeIST(session.startTime),
-            idleStartTimeIST: formatTimeIST(now),
-            totalWorkDuration: session.totalWorkDuration,
-            totalIdleTime: session.totalIdleTime || 0,
-            totalBreakDuration: session.totalBreakDuration || 0,
-            isWorkTimePaused: true
-          } 
-        });
-      }
-      
-      // Already idle, just return current state
-      return res.json({ 
-        success: true, 
-        message: "Still idle - Work time paused", 
-        data: { 
-          status: 'idle',
-          startTime: session.startTime,
-          startTimeIST: formatTimeIST(session.startTime),
-          totalWorkDuration: session.totalWorkDuration || 0,
-          totalIdleTime: session.totalIdleTime || 0,
-          totalBreakDuration: session.totalBreakDuration || 0,
-          isWorkTimePaused: true
-        } 
-      });
-    }
-
-    // ============================================
-    // CASE 2: USER IS ACTIVE - RESUME WORK TIME
-    // ============================================
-    else {
-      let idleDuration = 0;
-      
-      // If was idle, calculate idle duration and RESUME work
-      if (session.status === 'idle' && session.idleStartTime) {
-        idleDuration = (now - session.idleStartTime) / (1000 * 60);
-        
-        if (idleDuration > 0) {
-          session.totalIdleTime = (session.totalIdleTime || 0) + idleDuration;
-          session.activityLogs.push({ 
-            timestamp: now, 
-            type: 'idle_end', 
-            details: 'User became active again - Work time resumed',
-            duration: Math.round(idleDuration),
-            formattedTime: formatTimeIST(now)
-          });
-        }
-        
-        session.idleStartTime = null;
-      }
-      
-      // ⭐ FIX: Save working status to database
-      session.status = 'working';
-      session.lastActiveTime = now;
-      session.idlePopupShown = false;
-      
-      // Recalculate work time
-      const totalElapsed = (now - session.startTime) / (1000 * 60);
-      const totalNonWork = (session.totalBreakDuration || 0) + (session.totalIdleTime || 0);
-      session.totalWorkDuration = Math.max(0, totalElapsed - totalNonWork);
-      
-      session.activityLogs.push({ 
-        timestamp: now, 
-        type: 'heartbeat', 
-        details: 'Activity detected - Work time running',
-        formattedTime: formatTimeIST(now)
-      });
-      
-      // ⭐ SAVE TO DATABASE
-      await session.save();
-      
-      return res.json({ 
-        success: true, 
-        message: "Work time resumed - User active", 
-        data: { 
-          status: 'working',  // ✅ Now saved in database
-          startTime: session.startTime,
-          startTimeIST: formatTimeIST(session.startTime),
-          lastActiveTime: session.lastActiveTime,
-          totalWorkDuration: session.totalWorkDuration,
-          totalIdleTime: session.totalIdleTime || 0,
-          totalBreakDuration: session.totalBreakDuration || 0,
-          lastIdleDuration: Math.round(idleDuration),
-          isWorkTimePaused: false
-        } 
-      });
-    }
-  } catch (error) {
-    console.error('Update activity error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-
-
-
+const updateActivity=async(req,res)=>{try{const{employeeId,activityType}=req.body,x=await checkExistingActiveSession(employeeId);if(!x)return res.status(404).json({success:false,message:'No active work session'});const now=new Date(),threshold=(WorkSchedule.idleThresholdMinutes||5)*60000;if(x.status==='on_break')return res.json({success:true,data:{status:x.status,currentBreak:x.currentBreak,shouldShowPopup:false}});const last=x.lastActiveTime||x.startTime;if(x.status==='working'&&now-last>=threshold){x.status='idle';x.idleStartTime=new Date(last.getTime()+threshold);x.idlePopupShown=true;x.totalWorkDuration=Math.max(0,(x.idleStartTime-x.startTime)/60000-(x.totalBreakDuration||0)-(x.totalIdleTime||0));x.activityLogs.push({timestamp:now,type:'idle_start',details:'Five minutes without human activity'},{timestamp:now,type:'idle_popup_shown',details:'Idle prompt shown'});await x.save();}if(activityType==='human'){if(x.status==='idle'&&x.idleStartTime){const d=Math.max(0,(now-x.idleStartTime)/60000);x.totalIdleTime=(x.totalIdleTime||0)+d;x.activityLogs.push({timestamp:now,type:'idle_end',duration:Math.round(d),details:'Human activity resumed'});}x.status='working';x.idleStartTime=null;x.idlePopupShown=false;x.lastActiveTime=now;x.totalWorkDuration=Math.max(0,(now-x.startTime)/60000-(x.totalBreakDuration||0)-(x.totalIdleTime||0));x.activityLogs.push({timestamp:now,type:'active',details:'Qualifying human activity'});await x.save();}return res.json({success:true,data:{status:x.status,shouldShowPopup:x.status==='idle'&&x.idlePopupShown,lastActiveTime:x.lastActiveTime,idleStartTime:x.idleStartTime,currentBreak:x.currentBreak,isWorkTimePaused:x.status!=='working'}});}catch(e){return res.status(500).json({success:false,message:e.message});}};
 
 // @desc    Start break
-const startBreak = async (req, res) => {
+const startBreak=async(req,res)=>{try{const{employeeId}=req.body,rawReason=String(req.body.reason||req.body.breakType||req.body.type||'').toLowerCase();let reason=rawReason.includes('personal')?'personal':(rawReason.includes('meeting')?'meeting':(rawReason.includes('lunch')?'lunch':(rawReason.includes('tea')?'tea':'other')));const duration=Number(req.body.durationMinutes??req.body.breakDuration??req.body.duration??15);const x=await checkExistingActiveSession(employeeId);if(!x)return res.status(404).json({success:false,message:'No active session'});const now=new Date();if(x.currentBreak&&Array.isArray(x.breaks)){const prev=x.breaks.find(b=>b.status==='active'||!b.endTime);if(prev){prev.endTime=now;prev.status='ended';prev.duration=Math.max(0,Math.round((now-new Date(prev.startTime))/60000));x.totalBreakDuration=(x.totalBreakDuration||0)+prev.duration;}}const br={type:reason,reason:req.body.reason||rawReason||reason,source:'manual',startTime:now,expectedEndTime:new Date(now.getTime()+duration*60000),endTime:null,duration:0,status:'active'};x.status='on_break';x.currentBreak=br;x.breaks=x.breaks||[];x.breaks.push(br);x.activityLogs=x.activityLogs||[];x.activityLogs.push({timestamp:now,type:'break_start',details:'Manual '+(req.body.reason||rawReason||reason)+' break'});await x.save();return res.json({success:true,data:{status:x.status,currentBreak:x.currentBreak,expectedEndTime:br.expectedEndTime}});}catch(e){console.error('startBreak error:', e);return res.status(500).json({success:false,message:e.message});}};
+
+// @desc    End active break manually
+const endBreak = async (req, res) => {
   try {
-    const { employeeId, breakType } = req.body;
-    if (!employeeId || !breakType) return res.status(400).json({ 
-      success: false, 
-      message: "Employee ID and break type are required" 
-    });
-
+    const employeeId = req.body.employeeId;
     const session = await checkExistingActiveSession(employeeId);
-    if (!session) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "No active work session found. Please start work first." 
-      });
+    if (!session || session.status !== 'on_break') {
+      return res.status(404).json({ success: false, message: 'No active break found to end' });
     }
-    
-    if (session.status === 'on_break') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Already on break. Please end current break first." 
-      });
-    }
-
-    const breakDuration = breakType === 'lunch' ? 60 : 15;
     const now = new Date();
-    const breakEndTime = new Date(now.getTime() + breakDuration * 60000);
-
-    const totalElapsed = (now - session.startTime) / (1000 * 60);
-    const totalNonWork = (session.totalBreakDuration || 0) + (session.totalIdleTime || 0);
-    session.totalWorkDuration = Math.max(0, totalElapsed - totalNonWork);
-    
-    session.status = 'on_break';
+    const br = session.currentBreak;
+    if (br) {
+      const endAt = now;
+      br.endTime = endAt;
+      br.duration = Math.max(0, Math.round((endAt - new Date(br.startTime)) / 60000));
+      br.status = 'ended';
+      const item = session.breaks.find(b => b.status === 'active' && new Date(b.startTime).getTime() === new Date(br.startTime).getTime());
+      if (item) {
+        item.endTime = endAt;
+        item.duration = br.duration;
+        item.status = 'ended';
+      }
+      session.totalBreakDuration = (session.totalBreakDuration || 0) + br.duration;
+    }
+    session.status = 'working';
+    session.currentBreak = null;
     session.lastActiveTime = now;
-    session.activityLogs.push({ 
-      timestamp: now, 
-      type: 'break_start', 
-      details: `${breakType} break started for ${breakDuration} minutes`,
-      startTime: session.startTime,
-      startTimeIST: formatTimeIST(session.startTime),
-      breakType: breakType,
-      breakDuration: breakDuration,
-      expectedEndTime: breakEndTime,
-      formattedTime: formatTimeIST(now)
+    session.idleStartTime = null;
+    session.idlePopupShown = false;
+    session.totalWorkDuration = Math.max(0, (now - session.startTime) / 60000 - (session.totalBreakDuration || 0) - (session.totalIdleTime || 0));
+    session.activityLogs.push({
+      timestamp: now,
+      type: 'break_end',
+      duration: br ? br.duration : 0,
+      details: `${br ? (br.reason || br.type) : 'Break'} ended, work resumed`
     });
-    
     await session.save();
-
-    activeBreaks.set(employeeId, { 
-      breakEndTime, 
-      breakType, 
-      sessionId: session._id, 
-      breakDuration,
-      startTime: now
-    });
-    
-    setTimeout(() => autoEndBreakAndCheckActivity(employeeId), breakDuration * 60 * 1000);
-
-    res.json({ 
-      success: true, 
-      message: `${breakType} break started for ${breakDuration} minutes`, 
-      data: { 
-        breakType, 
-        breakDuration, 
-        breakEndTime, 
-        breakEndTimeIST: formatTimeIST(breakEndTime),
-        breakStartTimeIST: formatTimeIST(now),
-        totalWorkDuration: session.totalWorkDuration,
-        isWorkTimePaused: true
-      } 
+    return res.json({
+      success: true,
+      message: 'Break ended successfully. Work resumed!',
+      data: {
+        status: session.status,
+        currentBreak: null,
+        totalBreakDuration: session.totalBreakDuration,
+        totalWorkDuration: session.totalWorkDuration
+      }
     });
   } catch (error) {
-    console.error('Start break error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    console.error('End break error:', error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -1905,92 +1635,7 @@ const autoEndBreakAndCheckActivity = async (employeeId) => {
 };
 
 // @desc    Report idle status from frontend
-const reportIdle = async (req, res) => {
-  try {
-    const { employeeId, isIdle } = req.body;
-    if (!employeeId) return res.status(400).json({ success: false, message: "Employee ID is required" });
-
-    const session = await checkExistingActiveSession(employeeId);
-    if (!session) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "No active work session found" 
-      });
-    }
-
-    const now = new Date();
-
-    if (isIdle === true || isIdle === 'true') {
-      if (session.status === 'working') {
-        const totalElapsed = (now - session.startTime) / (1000 * 60);
-        const totalNonWork = (session.totalBreakDuration || 0) + (session.totalIdleTime || 0);
-        session.totalWorkDuration = Math.max(0, totalElapsed - totalNonWork);
-        
-        session.status = 'idle';
-        session.idleStartTime = now;
-        session.lastActiveTime = now;
-        session.activityLogs.push({ 
-          timestamp: now, 
-          type: 'idle', 
-          details: 'User idle - no mouse/keyboard activity',
-          formattedTime: formatTimeIST(now)
-        });
-        await session.save();
-        
-        return res.json({ 
-          success: true, 
-          message: "Work time paused - Idle status recorded", 
-          data: { 
-            status: 'idle', 
-            startTime: session.startTime,  
-            startTimeIST: formatTimeIST(session.startTime),
-            idleStartTime: now,
-            totalWorkDuration: session.totalWorkDuration,
-            isWorkTimePaused: true
-          } 
-        });
-      }
-    } else {
-      if (session.status === 'idle' && session.idleStartTime) {
-        const idleDuration = (now - session.idleStartTime) / (1000 * 60);
-        session.totalIdleTime = (session.totalIdleTime || 0) + idleDuration;
-        session.status = 'working';
-        session.lastActiveTime = now;
-        session.idleStartTime = null;
-        session.activityLogs.push({ 
-          timestamp: now, 
-          type: 'active', 
-          details: 'User active again',
-          duration: Math.round(idleDuration),
-          formattedTime: formatTimeIST(now)
-        });
-        
-        const totalElapsed = (now - session.startTime) / (1000 * 60);
-        const totalNonWork = (session.totalBreakDuration || 0) + (session.totalIdleTime || 0);
-        session.totalWorkDuration = Math.max(0, totalElapsed - totalNonWork);
-        await session.save();
-        
-        return res.json({ 
-          success: true, 
-          message: "Work time resumed - Active status restored", 
-          data: { 
-            status: 'working', 
-            startTime: session.startTime,
-            startTimeIST: formatTimeIST(session.startTime),
-            idleDuration: Math.round(idleDuration),
-            totalWorkDuration: session.totalWorkDuration,
-            isWorkTimePaused: false
-          } 
-        });
-      }
-    }
-
-    res.json({ success: true, data: { status: session.status } });
-  } catch (error) {
-    console.error('Report idle error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+const reportIdle=async(req,res)=>{req.body.activityType=req.body.activityType==='human'?'human':undefined;return updateActivity(req,res);};
 
 // @desc    Check idle status
 // const checkIdleStatus = async (req, res) => {
@@ -2053,275 +1698,24 @@ const reportIdle = async (req, res) => {
 //   }
 // };
 
-const checkIdleStatus = async (req, res) => {
-  try {
-    const { employeeId } = req.params;
-    
-    if (activeBreaks.has(employeeId)) {
-      const breakInfo = activeBreaks.get(employeeId);
-      return res.json({ 
-        success: true, 
-        shouldShowPopup: false, 
-        status: 'on_break', 
-        breakInfo: { 
-          type: breakInfo.breakType, 
-          remainingMinutes: Math.ceil((breakInfo.breakEndTime - new Date()) / 60000),
-          breakEndTime: breakInfo.breakEndTime
-        } 
-      });
-    }
-
-    const session = await checkExistingActiveSession(employeeId);
-    if (!session) return res.json({ success: true, shouldShowPopup: false, status: 'not_started' });
-    if (session.status === 'completed') return res.json({ success: true, shouldShowPopup: false, status: 'completed' });
-
-    const now = new Date();
-    
-    // ⭐ FIX: If status is 'working', update lastActiveTime
-    if (session.status === 'working') {
-      // Update lastActiveTime to now since user is working
-      session.lastActiveTime = now;
-      await session.save();  // ⭐ Save to database
-    }
-    
-    const lastActiveTime = session.lastActiveTime || session.startTime;
-    const idleMinutes = (now - lastActiveTime) / (1000 * 60);
-    const IDLE_THRESHOLD = 5;
-
-    // ⭐ Now idleMinutes will be 0 or very small when working
-    if (idleMinutes >= IDLE_THRESHOLD && !session.idlePopupShown) {
-      session.status = 'idle';
-      session.idlePopupShown = true;
-      session.idleStartTime = session.idleStartTime || lastActiveTime;
-      
-      const totalElapsed = (now - session.startTime) / (1000 * 60);
-      const totalNonWork = (session.totalBreakDuration || 0) + (session.totalIdleTime || 0);
-      session.totalWorkDuration = Math.max(0, totalElapsed - totalNonWork);
-      
-      session.activityLogs.push({ 
-        timestamp: now, 
-        type: 'idle_popup_shown', 
-        duration: idleMinutes,
-        formattedTime: formatTimeIST(now),
-        details: 'Idle detected - popup shown'
-      });
-      
-      await session.save();
-      
-      return res.json({ 
-        success: true, 
-        shouldShowPopup: true, 
-        idleDuration: idleMinutes, 
-        status: 'idle',
-        startTime: session.startTime, 
-        startTimeIST: formatTimeIST(session.startTime) 
-      });
-    }
-
-    res.json({ 
-      success: true, 
-      shouldShowPopup: false, 
-      idleDuration: idleMinutes, 
-      status: session.status, 
-      startTime: session.startTime, 
-      startTimeIST: formatTimeIST(session.startTime) 
-    });
-  } catch (error) {
-    console.error('Check idle status error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-
-
-
+const checkIdleStatus=async(req,res)=>{try{const x=await findTodaySession(req.params.employeeId);if(!x){return res.json({success:true,status:'not_started',shouldShowPopup:false,shouldShowStartReminder:true,currentBreak:null});}if(x.status==='on_break')return res.json({success:true,status:x.status,shouldShowPopup:false,currentBreak:x.currentBreak});const now=new Date(),last=x.lastActiveTime||x.startTime,idle=Math.max(0,(now-last)/60000);let popup=x.status==='idle'&&x.idlePopupShown;if(x.status==='working'&&idle>=(WorkSchedule.idleThresholdMinutes||5)){const idleStart=new Date(last.getTime()+(WorkSchedule.idleThresholdMinutes||5)*60000),r=await WorkSession.updateOne({_id:x._id,status:'working',lastActiveTime:last},{$set:{status:'idle',idleStartTime:idleStart,idlePopupShown:true,totalWorkDuration:Math.max(0,(idleStart-x.startTime)/60000-(x.totalBreakDuration||0)-(x.totalIdleTime||0))},$push:{activityLogs:{$each:[{timestamp:now,type:'idle_start',details:'Inactivity threshold reached'},{timestamp:now,type:'idle_popup_shown',details:'Idle prompt shown'}]}}});popup=r.modifiedCount>0;if(popup){x.status='idle';x.idleStartTime=idleStart;x.idlePopupShown=true;}}return res.json({success:true,status:x.status,shouldShowPopup:popup,idleDuration:Math.floor(idle),idleStartTime:x.idleStartTime,lastActiveTime:x.lastActiveTime,currentBreak:x.currentBreak,isWorkTimePaused:x.status==='idle'});}catch(e){return res.status(500).json({success:false,message:e.message});}};
 
 // @desc    Handle idle response
-const handleIdleResponse = async (req, res) => {
-  try {
-    const { employeeId, action } = req.body;
-    if (!employeeId || !action) return res.status(400).json({ success: false, message: "Employee ID and action are required" });
-
-    const session = await checkExistingActiveSession(employeeId);
-    if (!session) return res.status(404).json({ success: false, message: "No active work session found" });
-
-    const now = new Date();
-    if (action === 'continue') {
-      if (session.lastActiveTime && session.status === 'idle') {
-        const idleDuration = (now - session.lastActiveTime) / (1000 * 60);
-        if (idleDuration > 0) session.totalIdleTime = (session.totalIdleTime || 0) + idleDuration;
-      }
-      session.status = 'working';
-      session.lastActiveTime = now;
-      session.idlePopupShown = false;
-      session.idleStartTime = null;
-      
-      const totalElapsed = (now - session.startTime) / (1000 * 60);
-      const totalNonWork = (session.totalBreakDuration || 0) + (session.totalIdleTime || 0);
-      session.totalWorkDuration = Math.max(0, totalElapsed - totalNonWork);
-      
-      session.activityLogs.push({
-        timestamp: now,
-        type: 'active',
-        details: 'Resumed work after idle',
-        formattedTime: formatTimeIST(now)
-      });
-      await session.save();
-      res.json({ 
-        success: true, 
-        message: "Work resumed",
-        data: { 
-          status: 'working',
-          startTime: session.startTime, 
-          startTimeIST: formatTimeIST(session.startTime), 
-          totalWorkDuration: session.totalWorkDuration 
-        } 
-      });
-    } else if (action === 'stop') {
-      session.status = 'completed';
-      session.endTime = now;
-      session.activityLogs.push({
-        timestamp: now,
-        type: 'work_end',
-        details: 'Work session stopped',
-        formattedTime: formatTimeIST(now)
-      });
-      await session.save();
-      res.json({ 
-        success: true, 
-        message: "Work session stopped", 
-        data: { 
-          startTime: session.startTime,  
-          startTimeIST: formatTimeIST(session.startTime),  
-          endTime: now,  
-          endTimeIST: formatTimeIST(now),
-          totalWorkDuration: session.totalWorkDuration 
-        } 
-      });
-    } else {
-      res.status(400).json({ success: false, message: "Invalid action" });
-    }
-  } catch (error) {
-    console.error('Handle idle response error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+const handleIdleResponse=async(req,res)=>{try{const{employeeId,action}=req.body;if(!['continue','stop'].includes(action))return res.status(400).json({success:false,message:'Invalid action'});const x=await checkExistingActiveSession(employeeId);if(!x)return res.status(404).json({success:false,message:'No active work session'});const now=new Date(),idle=x.status==='idle'&&x.idleStartTime?Math.max(0,(now-x.idleStartTime)/60000):0;x.totalIdleTime=(x.totalIdleTime||0)+idle;x.idlePromptResponse=action;x.idlePromptRespondedAt=now;x.activityLogs.push({timestamp:now,type:'idle_response',details:'Employee selected '+action});if(action==='continue'){x.status='working';x.lastActiveTime=now;x.idleStartTime=null;x.idlePopupShown=false;x.totalWorkDuration=Math.max(0,(now-x.startTime)/60000-(x.totalBreakDuration||0)-x.totalIdleTime);}else{x.status='completed';x.endTime=now;x.idleStartTime=null;x.totalWorkDuration=Math.max(0,(now-x.startTime)/60000-(x.totalBreakDuration||0)-x.totalIdleTime);x.activityLogs.push({timestamp:now,type:'work_end',details:'Stopped from idle prompt'});}await x.save();return res.json({success:true,data:{status:x.status,idlePromptResponse:action,totalWorkDuration:x.totalWorkDuration}});}catch(e){return res.status(500).json({success:false,message:e.message});}};
 
 // @desc    End work session
-const endWork = async (req, res) => {
-  try {
-    const { employeeId } = req.body;
-    if (!employeeId) return res.status(400).json({ success: false, message: "Employee ID is required" });
-
-    if (activeBreaks.has(employeeId)) activeBreaks.delete(employeeId);
-    
-    const session = await checkExistingActiveSession(employeeId);
-    if (!session) return res.status(404).json({ success: false, message: "No active work session found" });
-
-    const now = new Date();
-    const totalElapsed = (now - session.startTime) / (1000 * 60);
-    const totalNonWork = (session.totalBreakDuration || 0) + (session.totalIdleTime || 0);
-    
-    session.totalWorkDuration = Math.max(0, totalElapsed - totalNonWork);
-    session.status = 'completed';
-    session.endTime = now;
-    
-    session.activityLogs.push({
-      timestamp: now,
-      type: 'work_end',
-      details: 'Work session ended',
-      formattedTime: formatTimeIST(now),
-      totalWorkHours: ((session.totalWorkDuration || 0) / 60).toFixed(2)
-    });
-    
-    await session.save();
-
-    res.json({ 
-      success: true, 
-      message: "Work session ended", 
-      data: { 
-        totalWorkDuration: session.totalWorkDuration, 
-        totalWorkHours: (session.totalWorkDuration / 60).toFixed(2), 
-        totalBreakDuration: session.totalBreakDuration || 0, 
-        totalIdleTime: session.totalIdleTime || 0, 
-        startTime: session.startTime,
-        startTimeIST: formatTimeIST(session.startTime),
-        endTime: session.endTime,
-        endTimeIST: formatTimeIST(session.endTime),
-        dateIST: formatDateIST(session.date)
-      } 
-    });
-  } catch (error) {
-    console.error('End work error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+const endWork=async(req,res)=>{try{const x=await checkExistingActiveSession(req.body.employeeId);if(!x)return res.status(404).json({success:false,message:'No active work session'});const now=new Date();if(x.currentBreak?.status==='active'){const br=x.currentBreak,endAt=br.expectedEndTime&&br.expectedEndTime<now?br.expectedEndTime:now;br.endTime=endAt;br.duration=Math.max(0,(endAt-br.startTime)/60000);br.status='ended';const item=x.breaks.find(b=>b.status==='active'&&b.startTime.getTime()===br.startTime.getTime());if(item){item.endTime=endAt;item.duration=br.duration;item.status='ended';}x.totalBreakDuration=(x.totalBreakDuration||0)+br.duration;}if(x.status==='idle'&&x.idleStartTime)x.totalIdleTime=(x.totalIdleTime||0)+Math.max(0,(now-x.idleStartTime)/60000);x.totalWorkDuration=Math.max(0,(now-x.startTime)/60000-(x.totalBreakDuration||0)-(x.totalIdleTime||0));x.status='completed';x.endTime=now;x.idleStartTime=null;x.activityLogs.push({timestamp:now,type:'work_end',details:'Work session ended'});await x.save();return res.json({success:true,message:'Work session ended',data:{status:x.status,totalWorkDuration:x.totalWorkDuration,totalBreakDuration:x.totalBreakDuration,totalIdleTime:x.totalIdleTime,startTime:x.startTime,endTime:x.endTime}});}catch(e){return res.status(500).json({success:false,message:e.message});}};
 
 // @desc    Get current status with real-time work time
-const getCurrentStatus = async (req, res) => {
-  try {
-    const { employeeId } = req.params;
-    
-    const session = await checkExistingActiveSession(employeeId);
-    if (!session) {
-      return res.json({ 
-        success: true, 
-        data: {
-          status: 'not_started',
-          message: 'No active work session',
-          isWorkTimePaused: false
-        }
-      });
-    }
-    
-    const now = new Date();
-    let currentWorkTime = 0;
-    let isWorkTimePaused = false;
-    
-    if (session.status === 'idle') {
-      currentWorkTime = session.totalWorkDuration || 0;
-      isWorkTimePaused = true;
-    } else if (session.status === 'working') {
-      const totalElapsed = (now - session.startTime) / (1000 * 60);
-      const totalNonWork = (session.totalBreakDuration || 0) + (session.totalIdleTime || 0);
-      currentWorkTime = Math.max(0, totalElapsed - totalNonWork);
-      isWorkTimePaused = false;
-    } else if (session.status === 'on_break') {
-      currentWorkTime = session.totalWorkDuration || 0;
-      isWorkTimePaused = true;
-    }
-    
-    res.json({
-      success: true,
-      data: {
-        status: session.status,
-        startTime: session.startTime,
-        endTime: session.endTime,
-        date: session.date,
-        startTimeIST: formatTimeIST(session.startTime),
-        currentWorkTime: Math.round(currentWorkTime),
-        currentWorkHours: (currentWorkTime / 60).toFixed(2),
-        totalIdleTime: Math.round(session.totalIdleTime || 0),
-        totalBreakDuration: Math.round(session.totalBreakDuration || 0),
-        isWorkTimePaused: isWorkTimePaused,
-        lastActiveTimeIST: formatTimeIST(session.lastActiveTime),
-        idleStartTimeIST: formatTimeIST(session.idleStartTime),
-        currentTimeIST: formatDateTimeIST(now)
-      }
-    });
-    
-  } catch (error) {
-    console.error('Get current status error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+const getCurrentStatus=async(req,res)=>{try{const employeeId=req.params.employeeId,x=await findTodaySession(employeeId);if(!x){return res.json({success:true,data:{status:'not_started',shouldShowStartReminder:true,shouldShowPopup:false,currentBreak:null,isWorkTimePaused:false}});}const now=new Date();let work=x.totalWorkDuration||0;if(x.status==='working')work=Math.max(0,(now-x.startTime)/60000-(x.totalBreakDuration||0)-(x.totalIdleTime||0));return res.json({success:true,data:{sessionId:x._id,status:x.status,startTime:x.startTime,endTime:x.endTime,date:x.date,currentWorkTime:Math.round(work),currentWorkHours:(work/60).toFixed(2),totalIdleTime:x.totalIdleTime||0,totalBreakDuration:x.totalBreakDuration||0,lastActiveTime:x.lastActiveTime,idleStartTime:x.idleStartTime,currentBreak:x.currentBreak,shouldShowPopup:x.status==='idle'&&x.idlePopupShown,shouldShowStartReminder:x.status==='not_started',isWorkTimePaused:x.status!=='working'}});}catch(e){return res.status(500).json({success:false,message:e.message});}};
 
 // @desc    Get today's summary
 const getTodaySummary = async (req, res) => {
   try {
     const { employeeId } = req.params;
     const today = getISTDate();
-    const session = await WorkSession.findOne({ employeeId, date: today });
+    const { start, end } = getISTDayRange();
+    const session = await WorkSession.findOne({ employeeId, date: { $gte: start, $lt: end } });
     
     if (!session) {
       return res.json({ 
@@ -2360,7 +1754,9 @@ const getTodaySummary = async (req, res) => {
         totalBreakDuration: Math.round(session.totalBreakDuration || 0), 
         totalIdleTime: Math.round(session.totalIdleTime || 0),
         totalBreakHours: ((session.totalBreakDuration || 0) / 60).toFixed(2),
-        totalIdleHours: ((session.totalIdleTime || 0) / 60).toFixed(2)
+        totalIdleHours: ((session.totalIdleTime || 0) / 60).toFixed(2),
+        breaks: session.breaks || [],
+        currentBreak: session.currentBreak || null
       } 
     });
   } catch (error) {
@@ -2414,10 +1810,9 @@ const getWorkHistory = async (req, res) => {
 // @desc    Get all active employees
 const getActiveEmployees = async (req, res) => {
   try {
-    const today = getISTDate();
-    
+    const { start, end } = getISTDayRange();
     let query = {
-      date: today,
+      date: { $gte: start, $lt: end },
       status: { $in: ['working', 'idle', 'on_break', 'idle_checking'] }
     };
     
@@ -2645,7 +2040,8 @@ const getTodayTimeline = async    (req, res) => {
   try {
     const { employeeId } = req.params;
     const today = getISTDate();
-    const session = await WorkSession.findOne({ employeeId, date: today });
+    const { start, end } = getISTDayRange();
+    const session = await WorkSession.findOne({ employeeId, date: { $gte: start, $lt: end } });
 
     if (!session) {
       return res.json({ 
@@ -2773,6 +2169,7 @@ module.exports = {
   checkIdleStatus,
   handleIdleResponse,
   startBreak,
+  endBreak,
   endWork,
   getCurrentStatus,
   getTodaySummary,

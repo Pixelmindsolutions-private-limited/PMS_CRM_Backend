@@ -214,6 +214,8 @@ app.use('/api/adminpanel', adminAuthRoutes);
 
 const startReminderJob = require('./cron/installmentReminder');
 startReminderJob();
+const startStaffWorkScheduler = require('./cron/staffWorkScheduler');
+startStaffWorkScheduler();
 // ==================== HEALTH CHECK ====================
 app.get('/api/health', (req, res) => {
   const profileDir = path.join(__dirname, 'uploads/staff/profile');
