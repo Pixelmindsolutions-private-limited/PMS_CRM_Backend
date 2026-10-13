@@ -129,8 +129,8 @@ const activityLogSchema = new mongoose.Schema({
 });
 
 const breakSchema = new mongoose.Schema({
-  type: { type: String, enum: ['tea', 'lunch', 'personal', 'meeting', 'other'], required: true },
-  reason: { type: String, default: null },
+  type: { type: String, enum: ['tea', 'lunch', 'personal', 'other'], required: true },
+  reason: { type: String, enum: ['tea', 'lunch', 'personal', 'other'], default: null },
   source: { type: String, enum: ['manual', 'scheduled'], default: 'manual' },
   expectedEndTime: { type: Date, default: null },
   startTime: { type: Date, required: true },
