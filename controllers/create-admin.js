@@ -203,7 +203,7 @@ transporter.verify((error, success) => {
 });
 
 // ==================== JWT CONFIGURATION (Inside Controller) ====================
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key_here';
+const JWT_SECRET = process.env.JWT_SECRET || 'mysecretkey';
 const JWT_EXPIRE = process.env.JWT_EXPIRE || '7d';
 
 const generateToken = (payload) => {
@@ -418,9 +418,11 @@ const verifyOTPAndLogin = async (req, res) => {
     await admin.save();
 
     const token = generateToken({
+      id: admin._id.toString(),
       adminId: admin._id.toString(),
       email: admin.email,
-      role: admin.role
+      role: admin.role,
+      type: 'admin'
     });
 
     return res.status(200).json({
@@ -483,9 +485,11 @@ const loginWithPassword = async (req, res) => {
     await admin.save();
 
     const token = generateToken({
+      id: admin._id.toString(),
       adminId: admin._id.toString(),
       email: admin.email,
-      role: admin.role
+      role: admin.role,
+      type: 'admin'
     });
 
     return res.status(200).json({

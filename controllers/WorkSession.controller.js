@@ -2206,11 +2206,18 @@ const getActiveEmployees = async (req, res) => {
 // @desc    Get all sessions for an employee
 const getAllSessions = async (req, res) => {
   try {
-    const { employeeId } = req.params;
-    const { limit = 100, page = 1 } = req.query;
+    const employeeId = req.params.employeeId || req.user?.employeeId;
+    const { limit = 100, page = 1, startDate, endDate } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    const total = await WorkSession.countDocuments({ employeeId });
-    const sessions = await WorkSession.find({ employeeId }).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit));
+    const query = { employeeId };
+    if (startDate && endDate) {
+      query.date = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+    const total = await WorkSession.countDocuments(query);
+    const sessions = await WorkSession.find(query).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit));
 
     const stats = { 
       totalSessions: total, 

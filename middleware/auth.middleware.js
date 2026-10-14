@@ -44,7 +44,7 @@ const protect = async (req, res, next) => {
     let token;
     
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
+      token = req.headers.authorization.split(' ')[1]?.trim();
     }
     
     if (!token) {
@@ -56,10 +56,12 @@ const protect = async (req, res, next) => {
     
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'mysecretkey');
-    
+    const userId = decoded.id || decoded.adminId;
+    const userType = decoded.type || (decoded.adminId ? 'admin' : undefined);
+
     // Check user type and fetch appropriate user
-    if (decoded.type === 'staff') {
-      const staff = await Staff.findById(decoded.id).select('-password');
+    if (userType === 'staff') {
+      const staff = await Staff.findById(userId).select('-password');
       if (!staff) {
         return res.status(401).json({
           success: false,
@@ -74,8 +76,8 @@ const protect = async (req, res, next) => {
         role: staff.role,
         type: 'staff'
       };
-    } else if (decoded.type === 'admin') {
-      const admin = await Admin.findById(decoded.id).select('-password');
+    } else if (userType === 'admin') {
+      const admin = await Admin.findById(userId).select('-password');
       if (!admin) {
         return res.status(401).json({
           success: false,

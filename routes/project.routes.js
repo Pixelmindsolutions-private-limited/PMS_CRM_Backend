@@ -141,6 +141,7 @@ const {
     getProjectOptions,
     getProjectStats,
     updateProject,
+    deleteProject,
     bulkDeleteProjects,
     restoreProject,
     permanentDeleteProjects,
@@ -184,6 +185,7 @@ router.delete('/permanent', permanentDeleteProjects);
 // ==================== PROJECT BY ID ====================
 router.get('/:id', getProjectById);
 router.put('/:id', updateProject);
+router.delete('/:id', deleteProject);
 router.put('/:id/restore', restoreProject);
 
 // ==================== INSTALLMENT ROUTES ====================

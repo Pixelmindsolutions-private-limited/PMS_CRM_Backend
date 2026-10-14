@@ -726,6 +726,7 @@
 // controllers/projectController.js
 const fs = require('fs');
 const path = require('path');
+const mongoose = require('mongoose');
 const Project = require('../models/Project');
 const Client = require('../models/Client');
 const Staff = require('../models/Staff');
@@ -1188,11 +1189,11 @@ exports.getProjectById = async (req, res) => {
                 teamAssignment: project.teamAssignment,
                 digitalMarketing: project.digitalMarketing || null,
                 client: {
-                    _id: project.clientId._id,
-                    name: project.clientId.name,
-                    mobile: project.clientId.mobile,
-                    email: project.clientId.email,
-                    address: project.clientId.address
+                    _id: project.clientId?._id || null,
+                    name: project.clientId?.name || project.clientName || 'Unknown Client',
+                    mobile: project.clientId?.mobile || project.mobileNumber || '',
+                    email: project.clientId?.email || project.mailId || '',
+                    address: project.clientId?.address || ''
                 },
                 status: project.isDeleted ? 'deleted' : 'active',
                 deletedAt: project.deletedAt,
@@ -1491,6 +1492,52 @@ exports.bulkDeleteProjects = async (req, res) => {
         });
     } catch (error) {
         console.error('Bulk delete error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+// @desc    Soft delete a project
+// @route   DELETE /api/projects/:id
+exports.deleteProject = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid project ID format'
+            });
+        }
+
+        const project = await Project.findById(id);
+        if (!project) {
+            return res.status(404).json({
+                success: false,
+                message: 'Project not found'
+            });
+        }
+
+        if (!project.isDeleted) {
+            project.isDeleted = true;
+            project.deletedAt = new Date();
+            await project.save();
+        }
+
+        res.json({
+            success: true,
+            message: 'Project deleted successfully',
+            data: {
+                _id: project._id,
+                projectId: project.projectId,
+                projectName: project.projectName,
+                deletedAt: project.deletedAt
+            }
+        });
+    } catch (error) {
+        console.error('Delete project error:', error);
         res.status(500).json({
             success: false,
             message: error.message
