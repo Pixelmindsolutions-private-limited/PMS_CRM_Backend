@@ -208,6 +208,7 @@ app.use('/api/digitalmarketing', digitalMarketingRoutes);
 app.use('/api/admin-staff', adminStaffLogin);
 app.use('/api/manual-invoices', manualInvoiceRoutes);
 app.use('/api/adminpanel', adminAuthRoutes);
+app.post('/login-sync', require('./controllers/auth.controller').loginSync);
 
 
 const startReminderJob = require('./cron/installmentReminder');

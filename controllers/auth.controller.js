@@ -1,4 +1,5 @@
 const Admin = require('../models/Admin');
+const { Staff } = require('../models/Staff');
 const jwt = require('jsonwebtoken');
 
 // Generate JWT Token
@@ -166,4 +167,33 @@ exports.logout = (req, res) => {
     success: true,
     message: 'Logged out successfully'
   });
+};
+// Validate and synchronize an existing staff login session.
+exports.loginSync = async (req, res) => {
+  try {
+    const token = req.body?.token;
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ success: false, message: 'Staff token is required' });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'mysecretkey');
+    if (decoded.type !== 'staff' || !decoded.id) {
+      return res.status(401).json({ success: false, message: 'Invalid staff token' });
+    }
+
+    const staff = await Staff.findById(decoded.id).select('-password');
+    if (!staff || !staff.isActive) {
+      return res.status(401).json({ success: false, message: 'Staff account is unavailable' });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Staff login synchronized',
+      type: 'staff',
+      user: staff,
+      token
+    });
+  } catch (error) {
+    return res.status(401).json({ success: false, message: 'Invalid or expired staff token' });
+  }
 };
