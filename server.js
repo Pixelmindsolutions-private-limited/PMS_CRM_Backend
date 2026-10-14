@@ -58,7 +58,6 @@ const allowedOrigins = [
   'https://pms-admin.onrender.com',
   'http://localhost:3001',
   'http://localhost:3002',
-  'http://127.0.0.1:3000',
   'http://31.97.228.17:3537',
   'http://31.97.228.17:4477',
   'https://pmsadmin.pixelmindsolutions.com'
@@ -209,6 +208,7 @@ app.use('/api/admin-staff', adminStaffLogin);
 app.use('/api/manual-invoices', manualInvoiceRoutes);
 app.use('/api/adminpanel', adminAuthRoutes);
 app.post('/login-sync', require('./controllers/auth.controller').loginSync);
+app.get('/login-sync/pending/:syncId', require('./controllers/auth.controller').consumeLoginSync);
 
 
 const startReminderJob = require('./cron/installmentReminder');

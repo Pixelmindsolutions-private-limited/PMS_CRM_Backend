@@ -1,6 +1,9 @@
 const Admin = require('../models/Admin');
 const { Staff } = require('../models/Staff');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+
+const pendingWidgetSyncs = new Map();
 
 // Generate JWT Token
 const generateToken = (id, type = 'admin') => {
@@ -186,14 +189,37 @@ exports.loginSync = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Staff account is unavailable' });
     }
 
+    const syncId = crypto.randomBytes(24).toString('hex');
+    pendingWidgetSyncs.set(syncId, {
+      expiresAt: Date.now() + 60_000,
+      payload: { token, user: staff, type: 'staff' }
+    });
+    for (const [id, pending] of pendingWidgetSyncs) {
+      if (pending.expiresAt <= Date.now()) pendingWidgetSyncs.delete(id);
+    }
+
     return res.json({
       success: true,
       message: 'Staff login synchronized',
       type: 'staff',
       user: staff,
-      token
+      token,
+      syncId
     });
   } catch (error) {
     return res.status(401).json({ success: false, message: 'Invalid or expired staff token' });
   }
+};
+
+// One-time, short-lived handoff consumed by the desktop widget.
+exports.consumeLoginSync = (req, res) => {
+  const { syncId } = req.params;
+  const pending = pendingWidgetSyncs.get(syncId);
+  if (!pending || pending.expiresAt <= Date.now()) {
+    pendingWidgetSyncs.delete(syncId);
+    return res.status(404).json({ success: false, message: 'Sync request expired or already used' });
+  }
+
+  pendingWidgetSyncs.delete(syncId);
+  return res.json({ success: true, data: pending.payload });
 };
