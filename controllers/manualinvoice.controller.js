@@ -83,7 +83,7 @@ exports.createManualInvoice = async (req, res) => {
         fs.writeFileSync(pdfPath, pdfBuffer);
 
         // Generate URL
-        const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
+        const baseUrl = process.env.BASE_URL || 'https://pmsbackend.pixelmindsolutions.com';
         const pdfUrl = `${baseUrl}/uploads/manualinvoices/${pdfFileName}`;
 
         // Update invoice with PDF paths
@@ -304,7 +304,7 @@ exports.updateManualInvoice = async (req, res) => {
             const pdfPath = path.join(invoicesDir, pdfFileName);
             fs.writeFileSync(pdfPath, pdfBuffer);
 
-            const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
+            const baseUrl = process.env.BASE_URL || 'https://pmsbackend.pixelmindsolutions.com';
             const pdfUrl = `${baseUrl}/uploads/manualinvoices/${pdfFileName}`;
 
             invoice.invoicePdf = pdfPath;
@@ -392,7 +392,7 @@ exports.downloadInvoicePDF = async (req, res) => {
             const pdfPath = path.join(invoicesDir, pdfFileName);
             fs.writeFileSync(pdfPath, pdfBuffer);
 
-            const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
+            const baseUrl = process.env.BASE_URL || 'https://pmsbackend.pixelmindsolutions.com';
             const pdfUrl = `${baseUrl}/uploads/manualinvoices/${pdfFileName}`;
 
             invoice.invoicePdf = pdfPath;

@@ -3,7 +3,7 @@
 //   const Project = require('../models/Project');
 
 
-//   const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
+//   const BASE_URL = process.env.BASE_URL || "https://pmsbackend.pixelmindsolutions.com";
 
 //   // ==================== PROJECT CRUD OPERATIONS ====================
 
@@ -2208,7 +2208,7 @@ exports.markAsPaid = async (req, res) => {
             const pdfPath = path.join(invoicesDir, pdfFileName);
             fs.writeFileSync(pdfPath, pdfBuffer);
 
-            const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
+            const baseUrl = process.env.BASE_URL || 'https://pmsbackend.pixelmindsolutions.com';
             const pdfUrl = `${baseUrl}/uploads/invoices/${pdfFileName}`;
 
             // ============ UPDATE INVOICE WITH PDF PATHS ============

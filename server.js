@@ -39,8 +39,7 @@ console.log(`🌐 Base URL: ${BASE_URL}`);
 // app.use(cors({
 //   origin: ['https://pmsbackend.pixelmindsolutions.com',
 //      'https://pms-admin.onrender.com',
-//       'http://localhost:3000',
-//       'http://31.97.228.17:3537',
+//     //       'http://31.97.228.17:3537',
 //        'http://localhost:3001', '**', '*'],
 //   credentials: true
 // }));
@@ -57,7 +56,6 @@ app.use(helmet({
 const allowedOrigins = [
   'https://pmsbackend.pixelmindsolutions.com',
   'https://pms-admin.onrender.com',
-  'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:3002',
   'http://127.0.0.1:3000',
