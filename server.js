@@ -213,8 +213,7 @@ app.get('/login-sync/pending/:syncId', require('./controllers/auth.controller').
 
 const startReminderJob = require('./cron/installmentReminder');
 startReminderJob();
-const startStaffWorkScheduler = require('./cron/staffWorkScheduler');
-startStaffWorkScheduler();
+
 // ==================== HEALTH CHECK ====================
 app.get('/api/health', (req, res) => {
   const profileDir = path.join(__dirname, 'uploads/staff/profile');

@@ -353,6 +353,7 @@ const sendLoginOTP = async (req, res) => {
     }
 
     const otp = admin.generateOTP();
+    console.log(`Generated OTP for ${admin.email}: ${otp} (valid for 10 minutes)`);
     await admin.save();
 
     await sendOTPEmail(admin.email, admin.name, otp, 'login');

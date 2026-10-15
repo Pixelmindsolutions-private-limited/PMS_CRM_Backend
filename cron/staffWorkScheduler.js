@@ -1,4 +1,4 @@
-﻿const cron = require('node-cron');
+const cron = require('node-cron');
 const WorkSession = require('../models/Worksession');
 const TIMEZONE = 'Asia/Kolkata';
 const BREAKS = [
@@ -22,10 +22,10 @@ async function startScheduledBreak(item, now) {
   const startTime = instantFor(p, item.start);
   const expectedEndTime = instantFor(p, item.end);
   const { start, end } = todayRange(p);
-  const sessions = await WorkSession.find({ startTime: { $lt: startTime }, date: { $gte: start, $lt: end }, status: 'working', currentBreak: null, 'breaks.type': { $ne: item.type } }).select('_id employeeId employeeName');
+  const sessions = await WorkSession.find({ startTime: { $lt: startTime }, date: { $gte: start, $lt: end }, status: 'working', currentBreak: null, 'breaks.type': { $ne: item.type } }).select('_id employeeId employeeName startTime totalBreakDuration totalIdleTime');
   for (const session of sessions) {
     const br = { type: item.type, startTime, endTime: null, expectedEndTime, duration: 0, status: 'active', source: 'scheduled', reason: item.type };
-    await WorkSession.updateOne({ _id: session._id, status: 'working', currentBreak: null, 'breaks.type': { $ne: item.type } }, { $set: { status: 'on_break', currentBreak: br, totalWorkDuration: Math.max(0, (startTime - session.startTime) / MINUTE - (session.totalBreakDuration || 0) - (session.totalIdleTime || 0)) }, $push: { breaks: br, activityLogs: { timestamp: startTime, type: 'break_start', details: `Scheduled ${item.type} break` } } });
+    await WorkSession.updateOne({ _id: session._id, status: 'working', currentBreak: null, 'breaks.type': { $ne: item.type } }, { $set: { status: 'on_break', currentBreak: br, totalWorkDuration: Math.max(0, (startTime - session.startTime) / MINUTE - (Number(session.totalBreakDuration) || 0) - (Number(session.totalIdleTime) || 0)) }, $push: { breaks: br, activityLogs: { timestamp: startTime, type: 'break_start', details: `Scheduled ${item.type} break` } } });
   }
 }
 async function endExpiredBreaks(now) {

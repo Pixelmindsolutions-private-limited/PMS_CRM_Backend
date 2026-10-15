@@ -54,7 +54,12 @@ const {
   refreshStaffToken,
   generateStaffToken,
   getStaffProfile,
-  changeStaffPassword
+  changeStaffPassword,
+  getAllSessions ,
+  getBreakSummary,
+  getBreakHistory,
+  getEmployeeSessionTracking
+
 } = require('../controllers/staff.controller');
 
 const { protect, staffOnly } = require('../middleware/auth.middleware');
@@ -71,7 +76,12 @@ router.get('/face-health', checkFaceHealth);
 router.post('/create', staffCreationFields, createStaff);
 router.get('/metadata', getMetadata);
 router.get('/all', getAllStaff);
+router.get('/all-sessions', getAllSessions);
+router.get('/break-summary',  getBreakSummary);
+router.get('/break-history', getBreakHistory);
+router.get('/employee-sessions/:employeeId', getEmployeeSessionTracking);
 router.get('/options', getStaffOptions);
+
 
 // ==================== PROTECTED ROUTES (Auth Required) ====================
 router.get('/profile', protect, staffOnly, getStaffProfile);
