@@ -998,11 +998,10 @@ exports.createProject = async (req, res) => {
 
 // @desc    Get all projects with pagination and filters
 // @route   GET /api/projects
+
 exports.getAllProjects = async (req, res) => {
     try {
         const {
-            page = 1,
-            limit = 10,
             search,
             category,
             clientId,
@@ -1019,13 +1018,11 @@ exports.getAllProjects = async (req, res) => {
         // Filter by soft delete status
         if (isDeleted === 'true') {
             query.isDeleted = true;
-        } else if (isDeleted === 'false') {
-            query.isDeleted = false;
         } else {
-            query.isDeleted = false; // Default: show only active
+            query.isDeleted = false;
         }
 
-        // Search functionality (general search)
+        // General search
         if (search) {
             query.$or = [
                 { projectName: { $regex: search, $options: 'i' } },
@@ -1041,7 +1038,10 @@ exports.getAllProjects = async (req, res) => {
 
         // Filter by projectName
         if (projectName) {
-            query.projectName = { $regex: projectName, $options: 'i' };
+            query.projectName = {
+                $regex: projectName,
+                $options: 'i'
+            };
         }
 
         // Filter by category
@@ -1054,55 +1054,35 @@ exports.getAllProjects = async (req, res) => {
             query.clientId = clientId;
         }
 
-        // Build the query
-        let projectsQuery = Project.find(query)
+        // Fetch all matching projects
+        let projects = await Project.find(query)
             .populate('clientId', 'name email mobile address')
             .select('-__v')
             .sort({ createdAt: -1 });
 
-        // Apply pagination only if not fetching all
-        if (limit !== 'all') {
-            const limitNum = parseInt(limit);
-            const pageNum = parseInt(page);
-            projectsQuery = projectsQuery
-                .limit(limitNum)
-                .skip((pageNum - 1) * limitNum);
-        }
-
-        const projects = await projectsQuery;
-
-        // Filter by client fields (clientName, clientEmail, clientMobile) - post-filtering
-        let filteredProjects = projects;
+        // Filter by client fields
         if (clientName) {
-            filteredProjects = filteredProjects.filter(project =>
-                project.clientId && project.clientId.name &&
-                project.clientId.name.toLowerCase().includes(clientName.toLowerCase())
+            projects = projects.filter(project =>
+                project.clientId?.name?.toLowerCase()
+                    .includes(clientName.toLowerCase())
             );
         }
+
         if (clientEmail) {
-            filteredProjects = filteredProjects.filter(project =>
-                project.clientId && project.clientId.email &&
-                project.clientId.email.toLowerCase().includes(clientEmail.toLowerCase())
+            projects = projects.filter(project =>
+                project.clientId?.email?.toLowerCase()
+                    .includes(clientEmail.toLowerCase())
             );
         }
+
         if (clientMobile) {
-            filteredProjects = filteredProjects.filter(project =>
-                project.clientId && project.clientId.mobile &&
-                project.clientId.mobile.includes(clientMobile)
+            projects = projects.filter(project =>
+                project.clientId?.mobile?.includes(clientMobile)
             );
         }
 
-        // Get total count for pagination
-        let total = 0;
-        if (limit !== 'all') {
-            total = await Project.countDocuments(query);
-        } else {
-            total = filteredProjects.length;
-        }
-
-        console.log(filteredProjects);
-
-        const formattedProjects = filteredProjects.map(project => ({
+        // Format projects
+        const formattedProjects = projects.map(project => ({
             _id: project._id,
             projectId: project.projectId,
             projectName: project.projectName,
@@ -1115,6 +1095,7 @@ exports.getAllProjects = async (req, res) => {
             workDivision: project.workDivision,
             teamAssignment: project.teamAssignment,
             digitalMarketing: project.digitalMarketing || null,
+
             client: {
                 _id: project.clientId?._id,
                 name: project.clientId?.name || 'Unknown Client',
@@ -1122,6 +1103,7 @@ exports.getAllProjects = async (req, res) => {
                 email: project.clientId?.email || '',
                 address: project.clientId?.address || ''
             },
+
             installments: project.installments || [],
             status: project.isDeleted ? 'deleted' : 'active',
             deletedAt: project.deletedAt,
@@ -1129,28 +1111,17 @@ exports.getAllProjects = async (req, res) => {
             updatedAt: project.updatedAt
         }));
 
-        // Build response
-        const response = {
+        // Response without pagination
+        return res.status(200).json({
             success: true,
+            count: formattedProjects.length,
             data: formattedProjects
-        };
+        });
 
-        // Add pagination only if not fetching all
-        if (limit !== 'all') {
-            const limitNum = parseInt(limit);
-            const pageNum = parseInt(page);
-            response.pagination = {
-                total,
-                page: pageNum,
-                limit: limitNum,
-                pages: Math.ceil(total / limitNum)
-            };
-        }
-
-        res.json(response);
     } catch (error) {
         console.error('Get all projects error:', error);
-        res.status(500).json({
+
+        return res.status(500).json({
             success: false,
             message: error.message
         });
