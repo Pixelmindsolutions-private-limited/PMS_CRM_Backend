@@ -2290,57 +2290,82 @@ const handleIdleResponse = async (req, res) => {
   }
 };
 
+const finalizeWorkSession = async (x, now = new Date(), details = "Work session ended") => {
+  await reconcileSession(x, now);
+
+  // End an active break
+  if (x.currentBreak?.status === "active") {
+    const br = x.currentBreak;
+    const endAt =
+      br.expectedEndTime && new Date(br.expectedEndTime) < now
+        ? new Date(br.expectedEndTime)
+        : now;
+
+    br.endTime = endAt;
+    br.duration = Math.max(
+      0,
+      (endAt.getTime() - new Date(br.startTime).getTime()) / 60000
+    );
+    br.status = "ended";
+
+    const item = x.breaks.find(
+      (b) =>
+        b.status === "active" &&
+        new Date(b.startTime).getTime() ===
+          new Date(br.startTime).getTime()
+    );
+
+    if (item) {
+      item.endTime = endAt;
+      item.duration = br.duration;
+      item.status = "ended";
+    }
+
+    x.totalBreakDuration = (Number(x.totalBreakDuration) || 0) + br.duration;
+  }
+
+  // Finalize ongoing idle time
+  if (x.status === "idle" && x.idleStartTime) {
+    x.totalIdleTime =
+      (Number(x.totalIdleTime) || 0) +
+      Math.max(0, (now.getTime() - new Date(x.idleStartTime).getTime()) / 60000);
+  }
+
+  x.totalWorkDuration = Math.max(
+    0,
+    (now.getTime() - new Date(x.startTime).getTime()) / 60000 -
+      (Number(x.totalBreakDuration) || 0) -
+      (Number(x.totalIdleTime) || 0)
+  );
+
+  x.status = "completed";
+  x.endTime = now;
+  x.idleStartTime = null;
+  x.currentBreak = null;
+
+  x.activityLogs.push({
+    timestamp: now,
+    type: "work_end",
+    details,
+  });
+
+  await x.save();
+  return x;
+};
 // @desc    End work session
 const endWork = async (req, res) => {
   try {
     const x = await checkExistingActiveSession(req.body.employeeId);
-    if (!x)
-      return res
-        .status(404)
-        .json({ success: false, message: "No active work session" });
-    const now = new Date();
-    await reconcileSession(x, now);
-    if (x.currentBreak?.status === "active") {
-      const br = x.currentBreak,
-        endAt =
-          br.expectedEndTime && br.expectedEndTime < now
-            ? br.expectedEndTime
-            : now;
-      br.endTime = endAt;
-      br.duration = Math.max(0, (endAt - br.startTime) / 60000);
-      br.status = "ended";
-      const item = x.breaks.find(
-        (b) =>
-          b.status === "active" &&
-          b.startTime.getTime() === br.startTime.getTime(),
-      );
-      if (item) {
-        item.endTime = endAt;
-        item.duration = br.duration;
-        item.status = "ended";
-      }
-      x.totalBreakDuration = (x.totalBreakDuration || 0) + br.duration;
+
+    if (!x) {
+      return res.status(404).json({
+        success: false,
+        message: "No active work session",
+      });
     }
-    if (x.status === "idle" && x.idleStartTime) {
-      x.totalIdleTime =
-        (x.totalIdleTime || 0) + Math.max(0, (now - x.idleStartTime) / 60000);
-    }
-    x.totalWorkDuration = Math.max(
-      0,
-      (now - x.startTime) / 60000 -
-        (x.totalBreakDuration || 0) -
-        (x.totalIdleTime || 0),
-    );
-    x.status = "completed";
-    x.endTime = now;
-    x.idleStartTime = null;
-    x.currentBreak = null;
-    x.activityLogs.push({
-      timestamp: now,
-      type: "work_end",
-      details: "Work session ended",
-    });
-    await x.save();
+
+    await finalizeWorkSession(x, new Date(), "Work session ended manually");
+
     return res.json({
       success: true,
       message: "Work session ended",
@@ -2354,10 +2379,13 @@ const endWork = async (req, res) => {
       },
     });
   } catch (e) {
-    return res.status(500).json({ success: false, message: e.message });
+    console.error("endWork error:", e);
+    return res.status(500).json({
+      success: false,
+      message: e.message,
+    });
   }
 };
-
 // @desc    Get current status with real-time work time
 const getCurrentStatus = async (req, res) => {
   try {

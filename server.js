@@ -1,31 +1,36 @@
-const express = require('express');
-const dns = require('dns');
-dns.setServers(['8.8.8.8', '8.8.4.4']);
-dns.setDefaultResultOrder('ipv4first');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const dotenv = require('dotenv');
-const path = require('path');
-const fs = require('fs');
+const express = require("express");
+const dns = require("dns");
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
+dns.setDefaultResultOrder("ipv4first");
+const mongoose = require("mongoose");
+const cors = require("cors");
+const helmet = require("helmet");
+const morgan = require("morgan");
+const dotenv = require("dotenv");
+const path = require("path");
+const fs = require("fs");
 
 const app = express();
+const startAutoEndWork = require("./cron/autoEndWork");
 
 // Load environment variables
-require('dotenv').config();
+require("dotenv").config();
 
 // ==================== DATABASE ====================
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://syamsai455_db_user:ElxSqlS2uls0g5ZF@cluster0.dxd60hg.mongodb.net/crm_db?retryWrites=true&w=majority';
+const MONGODB_URI =
+  process.env.MONGODB_URI ||
+  "mongodb+srv://syamsai455_db_user:ElxSqlS2uls0g5ZF@cluster0.dxd60hg.mongodb.net/crm_db?retryWrites=true&w=majority";
 
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('✅ MongoDB connected successfully'))
-  .catch(err => {
-    console.error('❌ MongoDB connection error:', err);
+mongoose
+  .connect(MONGODB_URI)
+  .then(() => console.log("✅ MongoDB connected successfully"))
+  .catch((err) => {
+    console.error("❌ MongoDB connection error:", err);
     process.exit(1);
   });
 
-const BASE_URL = process.env.BASE_URL || 'https://pmsbackend.pixelmindsolutions.com';
+const BASE_URL =
+  process.env.BASE_URL || "https://pmsbackend.pixelmindsolutions.com";
 console.log(`🌐 Base URL: ${BASE_URL}`);
 
 // ==================== MIDDLEWARE ====================
@@ -44,62 +49,71 @@ console.log(`🌐 Base URL: ${BASE_URL}`);
 //   credentials: true
 // }));
 
-
 // Security - Fixed Helmet configuration
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }, // Fixed: was "cross-orbit"
-  crossOriginOpenerPolicy: false,
-  crossOriginEmbedderPolicy: false
-}));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // Fixed: was "cross-orbit"
+    crossOriginOpenerPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  }),
+);
 
 // CORS - Fixed Configuration
 const allowedOrigins = [
-  'https://pmsbackend.pixelmindsolutions.com',
-  'https://pms-admin.onrender.com',
-  'http://localhost:3001',
-  'http://localhost:3002',
-  'http://31.97.228.17:3537',
-  'http://31.97.228.17:4477',
-  'https://pmsadmin.pixelmindsolutions.com'
+  "https://pmsbackend.pixelmindsolutions.com",
+  "https://pms-admin.onrender.com",
+  "http://localhost:3001",
+  "http://localhost:3002",
+  "http://31.97.228.17:3537",
+  "http://31.97.228.17:4477",
+  "https://pmsadmin.pixelmindsolutions.com",
 ];
 
 // Apply CORS middleware
-app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.log('⚠️ Blocked origin:', origin);
-      // For development, still allow but log
-      callback(null, true);
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'X-Requested-With',
-    'Accept',
-    'Origin',
-    'Access-Control-Allow-Origin'
-  ],
-  exposedHeaders: ['Content-Length', 'X-Requested-With'],
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-}));
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps or curl)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        console.log("⚠️ Blocked origin:", origin);
+        // For development, still allow but log
+        callback(null, true);
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "Accept",
+      "Origin",
+      "Access-Control-Allow-Origin",
+    ],
+    exposedHeaders: ["Content-Length", "X-Requested-With"],
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
+  }),
+);
 
 // Handle preflight requests explicitly
-app.options('*', (req, res) => {
+app.options("*", (req, res) => {
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
-    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+    );
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, X-Requested-With, Accept",
+    );
+    res.header("Access-Control-Allow-Credentials", "true");
     res.sendStatus(204);
   } else {
     res.sendStatus(204);
@@ -107,30 +121,30 @@ app.options('*', (req, res) => {
 });
 
 // Body parsers
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // Logging
-app.use(morgan('dev'));
+app.use(morgan("dev"));
 
 // ==================== STATIC FILES ====================
-const uploadsPath = path.join(__dirname, 'uploads');
-console.log('📁 Uploads directory:', uploadsPath);
-console.log('📁 Uploads exists:', fs.existsSync(uploadsPath));
+const uploadsPath = path.join(__dirname, "uploads");
+console.log("📁 Uploads directory:", uploadsPath);
+console.log("📁 Uploads exists:", fs.existsSync(uploadsPath));
 
 // Ensure upload directories exist
 const uploadDirs = [
-  path.join(__dirname, 'uploads'),
-  path.join(__dirname, 'uploads/staff'),
-  path.join(__dirname, 'uploads/staff/profile'),
-  path.join(__dirname, 'uploads/staff/idcards'),
-  path.join(__dirname, 'uploads/staff/documents'),
-  path.join(__dirname, 'uploads/temp'),
-  path.join(__dirname, 'uploads/fingerprints'),
-  path.join(__dirname, 'uploads/invoices')
+  path.join(__dirname, "uploads"),
+  path.join(__dirname, "uploads/staff"),
+  path.join(__dirname, "uploads/staff/profile"),
+  path.join(__dirname, "uploads/staff/idcards"),
+  path.join(__dirname, "uploads/staff/documents"),
+  path.join(__dirname, "uploads/temp"),
+  path.join(__dirname, "uploads/fingerprints"),
+  path.join(__dirname, "uploads/invoices"),
 ];
 
-uploadDirs.forEach(dir => {
+uploadDirs.forEach((dir) => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
     console.log(`✅ Created directory: ${dir}`);
@@ -139,105 +153,117 @@ uploadDirs.forEach(dir => {
 
 // ✅ FIXED: Serve static files with proper logging
 // Moved this BEFORE API routes and catch-all handlers
-app.use('/uploads', (req, res, next) => {
-  const fullPath = path.join(uploadsPath, req.path);
-  console.log(`📁 Static file request: ${req.path}`);
-  console.log(`📁 Looking for: ${fullPath}`);
-  console.log(`📁 File exists: ${fs.existsSync(fullPath)}`);
-  next();
-}, express.static(uploadsPath, {
-  setHeaders: (res, filePath) => {
-    console.log(`📁 Serving file: ${filePath}`);
-    if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
-      res.setHeader('Content-Type', 'image/jpeg');
-    } else if (filePath.endsWith('.png')) {
-      res.setHeader('Content-Type', 'image/png');
-    } else if (filePath.endsWith('.pdf')) {
-      res.setHeader('Content-Type', 'application/pdf');
-    } else if (filePath.endsWith('.doc') || filePath.endsWith('.docx')) {
-      res.setHeader('Content-Type', 'application/msword');
-    }
-    res.setHeader('Cache-Control', 'public, max-age=31536000');
-  }
-}));
-
+app.use(
+  "/uploads",
+  (req, res, next) => {
+    const fullPath = path.join(uploadsPath, req.path);
+    console.log(`📁 Static file request: ${req.path}`);
+    console.log(`📁 Looking for: ${fullPath}`);
+    console.log(`📁 File exists: ${fs.existsSync(fullPath)}`);
+    next();
+  },
+  express.static(uploadsPath, {
+    setHeaders: (res, filePath) => {
+      console.log(`📁 Serving file: ${filePath}`);
+      if (filePath.endsWith(".jpg") || filePath.endsWith(".jpeg")) {
+        res.setHeader("Content-Type", "image/jpeg");
+      } else if (filePath.endsWith(".png")) {
+        res.setHeader("Content-Type", "image/png");
+      } else if (filePath.endsWith(".pdf")) {
+        res.setHeader("Content-Type", "application/pdf");
+      } else if (filePath.endsWith(".doc") || filePath.endsWith(".docx")) {
+        res.setHeader("Content-Type", "application/msword");
+      }
+      res.setHeader("Cache-Control", "public, max-age=31536000");
+    },
+  }),
+);
 
 // ============ SERVE INVOICE PDFS (SPECIFIC) ============
-const invoicesPath = path.join(__dirname, 'uploads/invoices');
+const invoicesPath = path.join(__dirname, "uploads/invoices");
 console.log(`📁 Invoices directory: ${invoicesPath}`);
 console.log(`📁 Invoices exists: ${fs.existsSync(invoicesPath)}`);
 
-app.use('/uploads/invoices', express.static(invoicesPath, {
-  setHeaders: (res, filePath) => {
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline');
-    res.setHeader('Cache-Control', 'public, max-age=31536000');
-  }
-}));
+app.use(
+  "/uploads/invoices",
+  express.static(invoicesPath, {
+    setHeaders: (res, filePath) => {
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "inline");
+      res.setHeader("Cache-Control", "public, max-age=31536000");
+    },
+  }),
+);
 
 console.log(`📁 Invoices static route configured`);
 
-
 // ==================== ROUTES ====================
-const authRoutes = require('./routes/auth.routes');
-const projectRoutes = require('./routes/project.routes');
-const clientRoutes = require('./routes/client.routes');
-const staffRoutes = require('./routes/staff.routes');
-const worksheetRoutes = require('./routes/worksheet.routes');
-const attendanceRoutes = require('./routes/attendance.routes');
-const dashboardRoutes = require('./routes/dashboard.routes');
-const fingerprintRoutes = require('./routes/fingerprint.routes');
-const workSessionRoutes = require('./routes/WorkSession.routes');
-const digitalMarketingRoutes = require('./routes/marketing.routes');
-const adminStaffLogin = require('./routes/adminStaff.routes');
-const manualInvoiceRoutes = require('./routes/manualinvoice.routes');
-const adminAuthRoutes = require('./routes/adminpannel.routes');  
+const authRoutes = require("./routes/auth.routes");
+const projectRoutes = require("./routes/project.routes");
+const clientRoutes = require("./routes/client.routes");
+const staffRoutes = require("./routes/staff.routes");
+const worksheetRoutes = require("./routes/worksheet.routes");
+const attendanceRoutes = require("./routes/attendance.routes");
+const dashboardRoutes = require("./routes/dashboard.routes");
+const fingerprintRoutes = require("./routes/fingerprint.routes");
+const workSessionRoutes = require("./routes/WorkSession.routes");
+const digitalMarketingRoutes = require("./routes/marketing.routes");
+const adminStaffLogin = require("./routes/adminStaff.routes");
+const manualInvoiceRoutes = require("./routes/manualinvoice.routes");
+const adminAuthRoutes = require("./routes/adminpannel.routes");
 
 // Mount API routes
-app.use('/api/auth', authRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/clients', clientRoutes);
-app.use('/api/projects', projectRoutes);
-app.use('/api/staff', staffRoutes);
-app.use('/api/worksheets', worksheetRoutes);
-app.use('/api/attendance', attendanceRoutes);
-app.use('/api/fingerprint', fingerprintRoutes);
-app.use('/api/work-session', workSessionRoutes);
-app.use('/api/digitalmarketing', digitalMarketingRoutes);
-app.use('/api/admin-staff', adminStaffLogin);
-app.use('/api/manual-invoices', manualInvoiceRoutes);
-app.use('/api/adminpanel', adminAuthRoutes);
-app.post('/login-sync', require('./controllers/auth.controller').loginSync);
-app.get('/login-sync/pending/:syncId', require('./controllers/auth.controller').consumeLoginSync);
+app.use("/api/auth", authRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/clients", clientRoutes);
+app.use("/api/projects", projectRoutes);
+app.use("/api/staff", staffRoutes);
+app.use("/api/worksheets", worksheetRoutes);
+app.use("/api/attendance", attendanceRoutes);
+app.use("/api/fingerprint", fingerprintRoutes);
+app.use("/api/work-session", workSessionRoutes);
+app.use("/api/digitalmarketing", digitalMarketingRoutes);
+app.use("/api/admin-staff", adminStaffLogin);
+app.use("/api/manual-invoices", manualInvoiceRoutes);
+app.use("/api/adminpanel", adminAuthRoutes);
+app.post("/login-sync", require("./controllers/auth.controller").loginSync);
+app.get(
+  "/login-sync/pending/:syncId",
+  require("./controllers/auth.controller").consumeLoginSync,
+);
 
-
-const startReminderJob = require('./cron/installmentReminder');
+const startReminderJob = require("./cron/installmentReminder");
 startReminderJob();
 
 // ==================== HEALTH CHECK ====================
-app.get('/api/health', (req, res) => {
-  const profileDir = path.join(__dirname, 'uploads/staff/profile');
-  const profileFiles = fs.existsSync(profileDir) ? fs.readdirSync(profileDir) : [];
-  
+app.get("/api/health", (req, res) => {
+  const profileDir = path.join(__dirname, "uploads/staff/profile");
+  const profileFiles = fs.existsSync(profileDir)
+    ? fs.readdirSync(profileDir)
+    : [];
+
   res.json({
-    status: 'OK', 
+    status: "OK",
     timestamp: new Date(),
-    environment: process.env.NODE_ENV || 'production',
+    environment: process.env.NODE_ENV || "production",
     baseUrl: BASE_URL,
     uploadsPath,
     uploadsExists: fs.existsSync(uploadsPath),
     profileImagesCount: profileFiles.length,
-    sampleProfileImage: profileFiles.length > 0 ? `${BASE_URL}/uploads/staff/profile/${profileFiles[0]}` : null
+    sampleProfileImage:
+      profileFiles.length > 0
+        ? `${BASE_URL}/uploads/staff/profile/${profileFiles[0]}`
+        : null,
   });
 });
 
 // ==================== ERROR HANDLING ====================
 
 // 404 handler for API routes
-app.use('/api/*', (req, res) => {
+app.use("/api/*", (req, res) => {
   res.status(404).json({
     success: false,
-    message: `API Route not found: ${req.originalUrl}`
+    message: `API Route not found: ${req.originalUrl}`,
   });
 });
 
@@ -246,19 +272,19 @@ app.use('/api/*', (req, res) => {
 app.use((req, res) => {
   // Only handle non-static routes
   // Static files are already handled by express.static above
-  res.status(404).json({ 
-    success: false, 
-    message: 'Route not found' 
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
   });
 });
 
 // Global error handler
 app.use((err, req, res, next) => {
-  console.error('Error:', err.stack);
+  console.error("Error:", err.stack);
   res.status(err.status || 500).json({
     success: false,
-    message: err.message || 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    message: err.message || "Internal server error",
+    ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
   });
 });
 
@@ -266,13 +292,14 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
+  startAutoEndWork(); // Start midnight auto-end scheduler
+  console.log(`📝 Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(`🌐 Base URL: ${BASE_URL}`);
   console.log(`📁 Uploads path: ${uploadsPath}`);
   console.log(`📁 Uploads exists: ${fs.existsSync(uploadsPath)}`);
-  
+
   // List existing profile images on startup
-  const profileDir = path.join(__dirname, 'uploads/staff/profile');
+  const profileDir = path.join(__dirname, "uploads/staff/profile");
   if (fs.existsSync(profileDir)) {
     const files = fs.readdirSync(profileDir);
     console.log(`📸 Profile images found: ${files.length}`);
@@ -280,7 +307,6 @@ app.listen(PORT, () => {
       console.log(`📸 Sample: ${BASE_URL}/uploads/staff/profile/${files[0]}`);
     }
   } else {
-    console.log('⚠️ Profile directory does not exist');
+    console.log("⚠️ Profile directory does not exist");
   }
 });
-
