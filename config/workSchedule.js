@@ -16,5 +16,7 @@ const WORK_SCHEDULE = {
     durationMinutes: 15
   },
 
-  idleThresholdMinutes: 5
+  idleThresholdMinutes: 2
 };
+
+module.exports = WORK_SCHEDULE;

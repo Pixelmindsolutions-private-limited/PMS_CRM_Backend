@@ -413,75 +413,113 @@ const WorkSchedule = require("../config/workSchedule");
 
 //
 // @desc    End active break manually
+
 const endBreak = async (req, res) => {
   try {
     const employeeId = req.body.employeeId;
-    const session = await checkExistingActiveSession(employeeId);
-    if (!session || session.status !== "on_break") {
-      return res
-        .status(404)
-        .json({ success: false, message: "No active break found to end" });
+
+    if (!employeeId) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee ID is required",
+      });
     }
+
+    const session = await checkExistingActiveSession(employeeId);
+
+    if (!session || session.status !== "on_break" || !session.currentBreak) {
+      return res.status(404).json({
+        success: false,
+        message: "No active break found to end",
+      });
+    }
+
     const now = new Date();
     const br = session.currentBreak;
-    if (br) {
-      const endAt = now;
-      br.endTime = endAt;
-      br.duration = Math.max(
-        0,
-        Math.round((endAt - new Date(br.startTime)) / 60000),
-      );
-      br.status = "ended";
-      const item =
-        session.breaks &&
-        session.breaks.find(
-          (b) =>
-            b.status === "active" &&
-            new Date(b.startTime).getTime() ===
-              new Date(br.startTime).getTime(),
-        );
-      if (item) {
-        item.endTime = endAt;
-        item.duration = br.duration;
-        item.status = "ended";
-      }
-      session.totalBreakDuration =
-        (session.totalBreakDuration || 0) + br.duration;
+
+    const startTime = new Date(br.startTime);
+    const durationSeconds = Math.max(
+      0,
+      Math.floor((now.getTime() - startTime.getTime()) / 1000),
+    );
+
+    const durationMinutes = durationSeconds / 60;
+
+    // Preserve the completed break before clearing currentBreak
+    const endedBreak = {
+      type: br.type,
+      reason: br.reason,
+      source: br.source || "manual",
+      startTime: br.startTime,
+      endTime: now,
+      duration: Math.round(durationMinutes * 100) / 100,
+      durationSeconds,
+      status: "ended",
+    };
+
+    // Update the existing break record, or add it if missing
+    const existingBreak = session.breaks?.find(
+      (item) =>
+        item.status === "active" &&
+        item.startTime &&
+        new Date(item.startTime).getTime() === startTime.getTime(),
+    );
+
+    if (existingBreak) {
+      existingBreak.endTime = now;
+      existingBreak.duration = endedBreak.duration;
+      existingBreak.status = "ended";
+    } else {
+      session.breaks.push(endedBreak);
     }
+
+    session.totalBreakDuration =
+      (session.totalBreakDuration || 0) + durationMinutes;
+
     session.status = "working";
     session.currentBreak = null;
     session.lastActiveTime = now;
     session.idleStartTime = null;
     session.idlePopupShown = false;
+
     session.totalWorkDuration = Math.max(
       0,
-      (now - session.startTime) / 60000 -
+      (now.getTime() - new Date(session.startTime).getTime()) / 60000 -
         (session.totalBreakDuration || 0) -
         (session.totalIdleTime || 0),
     );
+
     session.activityLogs.push({
       timestamp: now,
       type: "break_end",
-      duration: br ? br.duration : 0,
-      details: `${br ? br.reason || br.type : "Break"} ended, work resumed`,
+      duration: endedBreak.duration,
+      details: `${br.reason || br.type} break ended. Actual duration: ${durationSeconds} seconds`,
     });
+
     if (typeof activeBreaks !== "undefined" && activeBreaks.has(employeeId)) {
       activeBreaks.delete(employeeId);
     }
+
     await session.save();
-    return res.json({
+
+    return res.status(200).json({
       success: true,
-      message: "Break ended successfully. Work resumed!",
+      message: "Break ended successfully",
       data: {
         status: session.status,
         currentBreak: null,
+        break: endedBreak,
         totalBreakDuration: session.totalBreakDuration,
-        totalWorkDuration: session.totalWorkDuration,
+        ...workTimeResponse(session.totalWorkDuration),
       },
     });
   } catch (error) {
-    console.error("End break error:", error);
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("END BREAK ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
@@ -1474,44 +1512,21 @@ const calculateCurrentWorkTime = (session, now = new Date()) => {
   return Math.max(0, totalElapsed - totalNonWork);
 };
 
+const workTimeResponse = (minutes) => {
+  const totalWorkSeconds = Math.max(0, Math.round((Number(minutes) || 0) * 60));
+  return { totalWorkDuration: totalWorkSeconds / 60, totalWorkSeconds };
+};
+
 // @desc    Start work session
 // Helper function to reconcile inactive periods (e.g. laptop shut down, power off, or away)
 const reconcileSession = async (session, now = new Date()) => {
   if (!session || session.status === "completed") return session;
 
-  const thresholdMs = (WorkSchedule.idleThresholdMinutes || 5) * 60000;
-  const last = session.lastActiveTime || session.startTime;
-  const inactiveMs = now.getTime() - last.getTime();
+  const thresholdMs = (Number(WorkSchedule?.idleThresholdMinutes) || 2) * 60000;
+  let changed = false;
 
-  // If session was working, but no human activity occurred for >= threshold (laptop was shut down / user away)
-  if (session.status === "working" && inactiveMs >= thresholdMs) {
-    const idleStart = new Date(last.getTime() + thresholdMs);
-    const workUntilIdle = Math.max(
-      0,
-      (idleStart.getTime() - session.startTime.getTime()) / 60000 -
-        (session.totalBreakDuration || 0) -
-        (session.totalIdleTime || 0),
-    );
-    session.status = "idle";
-    session.idleStartTime = idleStart;
-    session.idlePopupShown = true;
-    session.totalWorkDuration = workUntilIdle;
-    session.activityLogs.push(
-      {
-        timestamp: now,
-        type: "idle_start",
-        details: "Inactivity threshold reached during power-off or absence",
-      },
-      {
-        timestamp: now,
-        type: "idle_popup_shown",
-        details: "Idle prompt shown",
-      },
-    );
-    await session.save();
-  }
-
-  // If session is on break, check if scheduled break ended
+  // End an expired break once, at its expected end, then apply the normal
+  // inactivity grace period from that point.
   if (session.status === "on_break" && session.currentBreak?.expectedEndTime) {
     const expectedEnd = new Date(session.currentBreak.expectedEndTime);
     if (expectedEnd <= now) {
@@ -1534,18 +1549,57 @@ const reconcileSession = async (session, now = new Date()) => {
         item.duration = breakMins;
       }
 
-      session.status = "idle";
-      session.idleStartTime = expectedEnd;
-      session.idlePopupShown = true;
+      session.status = "working";
+      session.lastActiveTime = expectedEnd;
+      session.idleStartTime = null;
+      session.idlePopupShown = false;
       session.currentBreak = null;
       session.activityLogs.push({
-        timestamp: now,
+        timestamp: expectedEnd,
         type: "break_end",
         details: "Break ended after schedule expired",
       });
-      await session.save();
+      changed = true;
     }
   }
+
+  if (session.status === "working") {
+    const last = new Date(session.lastActiveTime || session.startTime || now);
+
+    const inactiveMs = Math.max(0, now.getTime() - last.getTime());
+
+    if (inactiveMs >= thresholdMs) {
+      // session idle mark hota hai
+    }
+    if (inactiveMs >= thresholdMs) {
+      const idleStart = new Date(last.getTime() + thresholdMs);
+      const startTime = new Date(session.startTime || idleStart);
+      session.status = "idle";
+      session.idleStartTime = idleStart;
+      session.idlePopupShown = true;
+      session.totalWorkDuration = Math.max(
+        0,
+        (idleStart.getTime() - startTime.getTime()) / 60000 -
+          (Number(session.totalBreakDuration) || 0) -
+          (Number(session.totalIdleTime) || 0),
+      );
+      session.activityLogs.push(
+        {
+          timestamp: idleStart,
+          type: "idle_start",
+          details: "Inactivity threshold reached during power-off or absence",
+        },
+        {
+          timestamp: idleStart,
+          type: "idle_popup_shown",
+          details: "Idle prompt shown",
+        },
+      );
+      changed = true;
+    }
+  }
+
+  if (changed) await session.save();
 
   return session;
 };
@@ -1571,8 +1625,7 @@ const startWork = async (req, res) => {
           startTimeIST: formatTimeIST(existing.startTime),
           status: existing.status,
           currentBreak: existing.currentBreak,
-          totalWorkDuration: Math.round(existing.totalWorkDuration || 0),
-          totalWorkSeconds: Math.round((existing.totalWorkDuration || 0) * 60),
+          ...workTimeResponse(existing.totalWorkDuration),
           shouldShowStartReminder: false,
           existing: true,
         },
@@ -1622,8 +1675,7 @@ const startWork = async (req, res) => {
             startTime: x.startTime,
             status: x.status,
             currentBreak: x.currentBreak,
-            totalWorkDuration: Math.round(x.totalWorkDuration || 0),
-            totalWorkSeconds: Math.round((x.totalWorkDuration || 0) * 60),
+            ...workTimeResponse(x.totalWorkDuration),
             existing: true,
           },
         });
@@ -1787,16 +1839,21 @@ const startWork = async (req, res) => {
 
 const updateActivity = async (req, res) => {
   try {
-    const { employeeId, activityType } = req.body;
+    const { employeeId, activityType, isIdle } = req.body;
+
     let x = await checkExistingActiveSession(employeeId);
-    if (!x)
-      return res
-        .status(404)
-        .json({ success: false, message: "No active work session" });
+
+    if (!x) {
+      return res.status(404).json({
+        success: false,
+        message: "No active work session",
+      });
+    }
 
     const now = new Date();
     x = await reconcileSession(x, now);
 
+    // Break time must not be counted as idle or working time.
     if (x.status === "on_break") {
       return res.json({
         success: true,
@@ -1804,42 +1861,60 @@ const updateActivity = async (req, res) => {
           status: x.status,
           currentBreak: x.currentBreak,
           shouldShowPopup: false,
+          isWorkTimePaused: true,
         },
       });
     }
 
+    // Only confirmed human input ends an idle period.
     if (activityType === "human") {
       if (x.status === "idle" && x.idleStartTime) {
-        const d = Math.max(
+        const idleMinutes = Math.max(
           0,
-          (now.getTime() - x.idleStartTime.getTime()) / 60000,
+          (now.getTime() - new Date(x.idleStartTime).getTime()) / 60000,
         );
-        x.totalIdleTime = (x.totalIdleTime || 0) + d;
+
+        x.totalIdleTime = (Number(x.totalIdleTime) || 0) + idleMinutes;
+
         x.activityLogs.push({
           timestamp: now,
           type: "idle_end",
-          duration: Math.round(d),
+          duration: Math.round(idleMinutes),
           details: "Human activity resumed",
         });
       }
+
       x.status = "working";
       x.idleStartTime = null;
       x.idlePopupShown = false;
       x.lastActiveTime = now;
-      const totalElapsed = (now.getTime() - x.startTime.getTime()) / 60000;
+
+      const elapsedMinutes =
+        (now.getTime() - new Date(x.startTime).getTime()) / 60000;
+
       x.totalWorkDuration = Math.max(
         0,
-        totalElapsed - (x.totalBreakDuration || 0) - (x.totalIdleTime || 0),
+        elapsedMinutes -
+          (Number(x.totalBreakDuration) || 0) -
+          (Number(x.totalIdleTime) || 0),
       );
+
       x.activityLogs.push({
         timestamp: now,
         type: "active",
         details: "Qualifying human activity",
       });
-      await x.save();
-    }
 
-    const currentWorkSeconds = Math.round((x.totalWorkDuration || 0) * 60);
+      await x.save();
+    } else if (activityType === "heartbeat") {
+      // Heartbeat is not proof of human activity.
+      // Do not reset lastActiveTime or resume an idle session.
+      // Reconciliation above handles the inactivity threshold.
+      if (x.status === "working" && isIdle === true) {
+        // Do not mark idle from this client flag alone.
+        // The server's lastActiveTime and threshold remain authoritative.
+      }
+    }
 
     return res.json({
       success: true,
@@ -1849,167 +1924,234 @@ const updateActivity = async (req, res) => {
         lastActiveTime: x.lastActiveTime,
         idleStartTime: x.idleStartTime,
         currentBreak: x.currentBreak,
-        totalWorkDuration: Math.round(x.totalWorkDuration || 0),
-        totalWorkSeconds: currentWorkSeconds,
+        totalIdleTime: Number(x.totalIdleTime) || 0,
+        totalBreakDuration: Number(x.totalBreakDuration) || 0,
+        ...workTimeResponse(x.totalWorkDuration),
         isWorkTimePaused: x.status !== "working",
       },
     });
   } catch (e) {
-    return res.status(500).json({ success: false, message: e.message });
+    console.error("updateActivity error:", e);
+
+    return res.status(500).json({
+      success: false,
+      message: e.message,
+    });
   }
 };
 
 // @desc    Start break
+
 const startBreak = async (req, res) => {
   try {
     const { employeeId } = req.body;
-    const reasonCandidates = [req.body.breakType, req.body.type, req.body.reason];
+
+    // Validate employee ID
+    if (!employeeId) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee ID is required",
+      });
+    }
+
+    // Accept break reason from multiple field names
+    const reasonCandidates = [
+      req.body.breakType,
+      req.body.type,
+      req.body.reason,
+    ];
+
     const mapBreakReason = (raw) => {
-      const v = String(raw || "").trim().toLowerCase();
+      const v = String(raw || "")
+        .trim()
+        .toLowerCase();
+
       if (!v) return "";
-      if (["tea", "lunch", "personal", "other"].includes(v)) return v;
+
+      if (["tea", "lunch", "personal", "other"].includes(v)) {
+        return v;
+      }
+
       if (v.includes("tea")) return "tea";
       if (v.includes("lunch")) return "lunch";
-      if (v.includes("personal") || v.includes("short")) return "personal";
-      if (v.includes("meeting") || v.includes("other") || v.includes("custom")) return "other";
+
+      if (v.includes("personal") || v.includes("short")) {
+        return "personal";
+      }
+
+      if (
+        v.includes("meeting") ||
+        v.includes("other") ||
+        v.includes("custom")
+      ) {
+        return "other";
+      }
+
       if (v.includes("break")) return "personal";
+
       return "";
     };
+
     const reason = reasonCandidates.map(mapBreakReason).find(Boolean) || "";
-    const duration = Number(req.body.durationMinutes ?? req.body.breakDuration ?? req.body.duration);
+
+    // IMPORTANT: Declare duration before using it
+    const duration = Number(
+      req.body.durationMinutes ?? req.body.breakDuration ?? req.body.duration,
+    );
+
+    // Debug logs
+    console.log("START BREAK REQUEST BODY:", req.body);
+    console.log("BREAK REASON CANDIDATES:", reasonCandidates);
+    console.log("NORMALIZED REASON:", reason);
+    console.log("DURATION:", duration);
+
+    // Validate reason
     if (!reason) {
       return res.status(400).json({
         success: false,
         message: "Invalid break reason. Use tea, lunch, personal, or other.",
       });
     }
-    if (![5, 10, 15, 30, 45, 60].includes(duration))
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid break duration" });
-    const x = await checkExistingActiveSession(employeeId);
-    if (!x)
-      return res
-        .status(404)
-        .json({ success: false, message: "No active session" });
-    const now = new Date(),
-      br = {
-        type: reason,
-        reason,
-        source: "manual",
-        startTime: now,
-        expectedEndTime: new Date(now.getTime() + duration * 60000),
-        endTime: null,
-        duration: 0,
-        status: "active",
-      };
-    const wasIdle = x.status === "idle";
-    const idleMinutes = wasIdle && x.idleStartTime
-      ? Math.max(0, (now - new Date(x.idleStartTime)) / 60000)
-      : 0;
-    const y = await WorkSession.findOneAndUpdate(
-      { _id: x._id, status: { $in: ["working", "idle"] }, currentBreak: null },
+
+    // Validate duration
+    if (![5, 10, 15, 30, 45, 60].includes(duration)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid break duration. Use 5, 10, 15, 30, 45, or 60 minutes.",
+      });
+    }
+
+    // Find employee's active session
+    let session = await checkExistingActiveSession(employeeId);
+    console.log("EMPLOYEE ID:", employeeId);
+    console.log("SESSION STATUS:", session?.status);
+    console.log("CURRENT BREAK:", session?.currentBreak);
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "No active session found",
+      });
+    }
+
+    session = await reconcileSession(session, new Date());
+
+    // Allow starting a break only while working or idle
+    if (!["working", "idle"].includes(session.status)) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Break cannot start because the session is not working or idle",
+      });
+    }
+
+    const now = new Date();
+
+    const br = {
+      type: reason,
+      reason,
+      source: "manual",
+      startTime: now,
+      expectedEndTime: new Date(now.getTime() + duration * 60000),
+      endTime: null,
+      duration: 0,
+      status: "active",
+    };
+
+    // Save any idle time accumulated before starting the break
+    const wasIdle = session.status === "idle";
+
+    const idleMinutes =
+      wasIdle && session.idleStartTime
+        ? Math.max(0, (now - new Date(session.idleStartTime)) / 60000)
+        : 0;
+
+    const updatedSession = await WorkSession.findOneAndUpdate(
+      {
+        _id: session._id,
+        status: { $in: ["working", "idle"] },
+        currentBreak: null,
+      },
       {
         $set: {
           status: "on_break",
           currentBreak: br,
           idleStartTime: null,
           idlePopupShown: false,
-          totalIdleTime: (x.totalIdleTime || 0) + idleMinutes,
+          totalIdleTime: (session.totalIdleTime || 0) + idleMinutes,
           totalWorkDuration: Math.max(
             0,
-            (now - x.startTime) / 60000 -
-              (x.totalBreakDuration || 0) -
-              (x.totalIdleTime || 0) -
+            (now - new Date(session.startTime)) / 60000 -
+              (session.totalBreakDuration || 0) -
+              (session.totalIdleTime || 0) -
               idleMinutes,
           ),
+          lastActiveTime: now,
         },
         $push: {
           breaks: br,
           activityLogs: {
             timestamp: now,
             type: "break_start",
-            details: "Manual " + reason + " break",
+            details: `Manual ${reason} break`,
           },
         },
       },
       { new: true },
     );
-    if (!y)
-      return res
-        .status(409)
-        .json({
-          success: false,
-          message: "A break is already active or session is not working",
-        });
-    return res.json({
+
+    if (!updatedSession) {
+      return res.status(409).json({
+        success: false,
+        message: "A break is already active or the session is not working",
+      });
+    }
+
+    // The timer is a convenience; reconcileSession also handles this break
+    // after a process restart or application interruption.
+    setTimeout(
+      () => autoEndBreakAndCheckActivity(employeeId),
+      duration * 60000,
+    );
+
+    return res.status(200).json({
       success: true,
+      message: `${reason} break started successfully`,
       data: {
-        status: y.status,
-        currentBreak: y.currentBreak,
+        status: updatedSession.status,
+        currentBreak: updatedSession.currentBreak,
         expectedEndTime: br.expectedEndTime,
       },
     });
   } catch (e) {
-    return res.status(500).json({ success: false, message: e.message });
+    console.error("START BREAK ERROR:", e);
+
+    return res.status(500).json({
+      success: false,
+      message: e.message,
+    });
   }
 };
 
 // Auto end break
 const autoEndBreakAndCheckActivity = async (employeeId) => {
   try {
-    const breakInfo = activeBreaks.get(employeeId);
-    if (!breakInfo) return;
+    const session = await checkExistingActiveSession(employeeId);
+    if (!session || session.status !== "on_break" || !session.currentBreak)
+      return;
 
-    const session = await WorkSession.findById(breakInfo.sessionId);
-    if (!session || session.status !== "on_break") return;
-
-    const now = new Date();
-    const actualBreakDuration = (now - breakInfo.startTime) / (1000 * 60);
-
-    session.activityLogs.push({
-      timestamp: now,
-      type: "break_end",
-      details: `${breakInfo.breakType} break ended`,
-      breakType: breakInfo.breakType,
-      actualDuration: Math.round(actualBreakDuration),
-      expectedDuration: breakInfo.breakDuration,
-      formattedTime: formatTimeIST(now),
-    });
-
-    session.totalBreakDuration =
-      (session.totalBreakDuration || 0) + actualBreakDuration;
-
-    const lastActiveTime = session.lastActiveTime || session.startTime;
-    const idleMinutes = (now - lastActiveTime) / (1000 * 60);
-
-    if (idleMinutes >= 1 && !session.idlePopupShown) {
-      session.status = "idle";
-      session.idlePopupShown = true;
-      session.idleStartTime = session.idleStartTime || lastActiveTime;
-      session.activityLogs.push({
-        timestamp: now,
-        type: "idle_popup_shown",
-        duration: idleMinutes,
-        details: "Idle detected after break",
-      });
-    } else {
-      session.status = "working";
-      session.lastActiveTime = now;
-      session.idlePopupShown = false;
-
-      const totalElapsed = (now - session.startTime) / (1000 * 60);
-      const totalNonWork =
-        (session.totalBreakDuration || 0) + (session.totalIdleTime || 0);
-      session.totalWorkDuration = Math.max(0, totalElapsed - totalNonWork);
+    const expectedEnd = session.currentBreak.expectedEndTime
+      ? new Date(session.currentBreak.expectedEndTime)
+      : null;
+    if (expectedEnd && expectedEnd > new Date()) {
+      setTimeout(
+        () => autoEndBreakAndCheckActivity(employeeId),
+        expectedEnd.getTime() - Date.now(),
+      );
+      return;
     }
 
-    await session.save();
-    activeBreaks.delete(employeeId);
-
-    console.log(
-      `Break ended for ${employeeId}. Duration: ${Math.round(actualBreakDuration)} minutes`,
-    );
+    await reconcileSession(session, new Date());
   } catch (error) {
     console.error("Auto end break error:", error);
   }
@@ -2056,8 +2198,11 @@ const checkIdleStatus = async (req, res) => {
       });
     }
 
-    const last = x.lastActiveTime || x.startTime;
-    const idle = Math.max(0, (now - last) / 60000);
+    const idleAnchor =
+      x.status === "idle" && x.idleStartTime
+        ? x.idleStartTime
+        : x.lastActiveTime || x.startTime;
+    const idle = Math.max(0, (now - new Date(idleAnchor)) / 60000);
     const popup = x.status === "idle" && x.idlePopupShown;
 
     return res.json({
@@ -2068,8 +2213,7 @@ const checkIdleStatus = async (req, res) => {
       idleStartTime: x.idleStartTime,
       lastActiveTime: x.lastActiveTime,
       currentBreak: x.currentBreak,
-      totalWorkDuration: Math.round(x.totalWorkDuration || 0),
-      totalWorkSeconds: Math.round((x.totalWorkDuration || 0) * 60),
+      ...workTimeResponse(x.totalWorkDuration),
       isWorkTimePaused: x.status === "idle",
     });
   } catch (e) {
@@ -2138,8 +2282,7 @@ const handleIdleResponse = async (req, res) => {
       data: {
         status: x.status,
         idlePromptResponse: action,
-        totalWorkDuration: Math.round(x.totalWorkDuration),
-        totalWorkSeconds: Math.round(x.totalWorkDuration * 60),
+        ...workTimeResponse(x.totalWorkDuration),
       },
     });
   } catch (e) {
@@ -2156,6 +2299,7 @@ const endWork = async (req, res) => {
         .status(404)
         .json({ success: false, message: "No active work session" });
     const now = new Date();
+    await reconcileSession(x, now);
     if (x.currentBreak?.status === "active") {
       const br = x.currentBreak,
         endAt =
@@ -2190,6 +2334,7 @@ const endWork = async (req, res) => {
     x.status = "completed";
     x.endTime = now;
     x.idleStartTime = null;
+    x.currentBreak = null;
     x.activityLogs.push({
       timestamp: now,
       type: "work_end",
@@ -2201,8 +2346,7 @@ const endWork = async (req, res) => {
       message: "Work session ended",
       data: {
         status: x.status,
-        totalWorkDuration: Math.round(x.totalWorkDuration),
-        totalWorkSeconds: Math.round(x.totalWorkDuration * 60),
+        ...workTimeResponse(x.totalWorkDuration),
         totalBreakDuration: Math.round(x.totalBreakDuration || 0),
         totalIdleTime: Math.round(x.totalIdleTime || 0),
         startTime: x.startTime,
@@ -2279,9 +2423,8 @@ const getCurrentStatus = async (req, res) => {
         startTime: x.startTime,
         endTime: x.endTime,
         date: x.date,
-        totalWorkDuration: Math.round(workMinutes),
-        totalWorkSeconds: Math.round(workMinutes * 60),
-        currentWorkTime: Math.round(workMinutes),
+        ...workTimeResponse(workMinutes),
+        currentWorkTime: workTimeResponse(workMinutes).totalWorkDuration,
         currentWorkHours: (workMinutes / 60).toFixed(2),
         totalIdleTime: Math.round(totalIdleTime),
         totalBreakDuration: Math.round(totalBreakDuration),
@@ -2359,8 +2502,7 @@ const getTodaySummary = async (req, res) => {
         startTimeIST: formatTimeIST(session.startTime),
         endTimeIST: formatTimeIST(session.endTime),
         dateIST: formatDateIST(session.date),
-        totalWorkDuration: Math.round(totalWorkDuration),
-        totalWorkSeconds: Math.round(totalWorkDuration * 60),
+        ...workTimeResponse(totalWorkDuration),
         totalWorkHours: (totalWorkDuration / 60).toFixed(2),
         totalBreakDuration: Math.round(totalBreak),
         totalIdleTime: Math.round(totalIdle),
@@ -2436,6 +2578,10 @@ const getActiveEmployees = async (req, res) => {
       )
       .sort({ startTime: -1 });
 
+    await Promise.all(
+      activeSessions.map((session) => reconcileSession(session, new Date())),
+    );
+
     const activeEmployees = await Promise.all(
       activeSessions.map(async (session) => {
         const staff = await Staff.findOne({
@@ -2444,7 +2590,9 @@ const getActiveEmployees = async (req, res) => {
 
         const now = new Date();
         const breaks = Array.isArray(session.breaks) ? session.breaks : [];
-        const activeBreakFromArray = breaks.find((b) => b.startTime && !b.endTime);
+        const activeBreakFromArray = breaks.find(
+          (b) => b.startTime && !b.endTime,
+        );
         const currentBreak =
           session.currentBreak?.startTime && !session.currentBreak?.endTime
             ? session.currentBreak
@@ -2460,8 +2608,13 @@ const getActiveEmployees = async (req, res) => {
           const durSec = b.duration
             ? Math.round(b.duration * 60)
             : b.startTime && b.endTime
-            ? Math.max(0, Math.floor((new Date(b.endTime) - new Date(b.startTime)) / 1000))
-            : 0;
+              ? Math.max(
+                  0,
+                  Math.floor(
+                    (new Date(b.endTime) - new Date(b.startTime)) / 1000,
+                  ),
+                )
+              : 0;
           const r = String(b.type || b.reason || "").toLowerCase();
           if (r.includes("lunch")) lunchSec += durSec;
           else if (r.includes("tea") || r.includes("refresh")) teaSec += durSec;
@@ -2472,22 +2625,33 @@ const getActiveEmployees = async (req, res) => {
         if (activeBreak) {
           activeBreakSec = Math.max(
             0,
-            Math.floor((now.getTime() - new Date(activeBreak.startTime).getTime()) / 1000),
+            Math.floor(
+              (now.getTime() - new Date(activeBreak.startTime).getTime()) /
+                1000,
+            ),
           );
-          const r = String(activeBreak.type || activeBreak.reason || "").toLowerCase();
+          const r = String(
+            activeBreak.type || activeBreak.reason || "",
+          ).toLowerCase();
           if (r.includes("lunch")) lunchSec += activeBreakSec;
-          else if (r.includes("tea") || r.includes("refresh")) teaSec += activeBreakSec;
+          else if (r.includes("tea") || r.includes("refresh"))
+            teaSec += activeBreakSec;
           else otherBreakSec += activeBreakSec;
         }
 
         const activeBreakType = activeBreak
-          ? String(activeBreak.type || activeBreak.reason || "break").toLowerCase()
+          ? String(
+              activeBreak.type || activeBreak.reason || "break",
+            ).toLowerCase()
           : null;
 
         let liveStatus = session.status;
         if (activeBreak) {
           if (activeBreakType.includes("lunch")) liveStatus = "lunch_break";
-          else if (activeBreakType.includes("tea") || activeBreakType.includes("refresh"))
+          else if (
+            activeBreakType.includes("tea") ||
+            activeBreakType.includes("refresh")
+          )
             liveStatus = "tea_break";
           else liveStatus = "on_break";
         }
@@ -2496,12 +2660,16 @@ const getActiveEmployees = async (req, res) => {
         if (session.status === "idle" && session.idleStartTime) {
           currentIdleSec = Math.max(
             0,
-            Math.floor((now.getTime() - new Date(session.idleStartTime).getTime()) / 1000),
+            Math.floor(
+              (now.getTime() - new Date(session.idleStartTime).getTime()) /
+                1000,
+            ),
           );
         }
 
         const totalIdleSec =
-          Math.round((Number(session.totalIdleTime) || 0) * 60) + currentIdleSec;
+          Math.round((Number(session.totalIdleTime) || 0) * 60) +
+          currentIdleSec;
         const totalBreakSec = lunchSec + teaSec + otherBreakSec;
 
         let workingSeconds = 0;
@@ -2509,11 +2677,18 @@ const getActiveEmployees = async (req, res) => {
           if (session.status === "working") {
             const elapsedSec = Math.max(
               0,
-              Math.floor((now.getTime() - new Date(session.startTime).getTime()) / 1000),
+              Math.floor(
+                (now.getTime() - new Date(session.startTime).getTime()) / 1000,
+              ),
             );
-            workingSeconds = Math.max(0, elapsedSec - totalBreakSec - totalIdleSec);
+            workingSeconds = Math.max(
+              0,
+              elapsedSec - totalBreakSec - totalIdleSec,
+            );
           } else {
-            workingSeconds = Math.round((Number(session.totalWorkDuration) || 0) * 60);
+            workingSeconds = Math.round(
+              (Number(session.totalWorkDuration) || 0) * 60,
+            );
           }
         }
 
@@ -2556,7 +2731,7 @@ const getActiveEmployees = async (req, res) => {
           currentWorkDuration: Math.round(workingSeconds / 60),
           currentWorkHours: (workingSeconds / 3600).toFixed(2),
           workingSeconds,
-          delaySeconds: totalIdleSec + totalBreakSec,
+          delaySeconds: totalIdleSec,
           idleSeconds: totalIdleSec,
           lunchTakenSec: lunchSec,
           teaTakenSec: teaSec,
@@ -2569,7 +2744,9 @@ const getActiveEmployees = async (req, res) => {
           activeBreak: activeBreak,
           breaks: session.breaks || [],
           isIdle: session.status === "idle",
-          isOnBreak: ["on_break", "lunch_break", "tea_break"].includes(liveStatus),
+          isOnBreak: ["on_break", "lunch_break", "tea_break"].includes(
+            liveStatus,
+          ),
         };
       }),
     );
