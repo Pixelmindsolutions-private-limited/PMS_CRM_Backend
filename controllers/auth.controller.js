@@ -3,223 +3,126 @@ const { Staff } = require('../models/Staff');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
+// Pending widget syncs: in-memory storage.
+// Note: this is suitable only when POST and GET requests
+// reach the same running Node.js process.
 const pendingWidgetSyncs = new Map();
 
-// Generate JWT Token
-const generateToken = (id, type = 'admin') => {
-  return jwt.sign({ id, type }, process.env.JWT_SECRET || 'mysecretkey', {
-    expiresIn: '7d'
-  });
-};
-
-// 1. CREATE ADMIN - Only for Postman (one-time use)
-exports.createAdmin = async (req, res) => {
-  try {
-    const { email, password, name } = req.body;
-
-    // Check if admin already exists
-    const existingAdmin = await Admin.findOne({ email });
-    if (existingAdmin) {
-      return res.status(400).json({
-        success: false,
-        message: 'Admin already exists with this email'
-      });
-    }
-
-    // Create new admin
-    const admin = await Admin.create({
-      email,
-      password: password || 'Admin@123',
-      name: name || email.split('@')[0]
-    });
-
-    // Generate token
-    const token = generateToken(admin._id, 'admin');
-
-    res.status(201).json({
-      success: true,
-      message: 'Admin created successfully',
-      data: {
-        id: admin._id,
-        email: admin.email,
-        name: admin.name,
-        token
-      }
-    });
-  } catch (error) {
-    console.error('Create admin error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-};
-
-// 2. SEND OTP - For frontend (always returns 123456)
-exports.sendOtp = async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email is required'
-      });
-    }
-
-    // Check if admin exists (optional - you can decide)
-    const admin = await Admin.findOne({ email });
-    
-    console.log(`📧 OTP sent to ${email}: 123456`);
-
-    res.json({
-      success: true,
-      message: 'OTP sent successfully',
-      data: {
-        otp: '123456', // Static OTP for demo
-        expiresIn: '10 minutes',
-        isExistingUser: !!admin // Let frontend know if user exists
-      }
-    });
-  } catch (error) {
-    console.error('Send OTP error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-};
-
-// 3. VERIFY OTP - For frontend (checks 123456 and logs in)
-exports.verifyOtp = async (req, res) => {
-  try {
-    const { email, otp } = req.body;
-
-    // Validate input
-    if (!email || !otp) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email and OTP are required'
-      });
-    }
-
-    // Check OTP (static for demo)
-    if (otp !== '123456') {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid OTP'
-      });
-    }
-
-    // Find admin (must exist - created via Postman first)
-    const admin = await Admin.findOne({ email });
-    
-    if (!admin) {
-      return res.status(404).json({
-        success: false,
-        message: 'Admin not found. Please create admin first.'
-      });
-    }
-
-    // Update last login
-    admin.lastLogin = new Date();
-    await admin.save();
-
-    // Generate token
-    const token = generateToken(admin._id, 'admin');
-
-    res.json({
-      success: true,
-      message: 'OTP verified successfully',
-      data: {
-        id: admin._id,
-        email: admin.email,
-        name: admin.name,
-        type: 'admin',
-        token
-      }
-    });
-  } catch (error) {
-    console.error('Verify OTP error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-};
-
-// Get current user
-exports.getMe = async (req, res) => {
-  try {
-    const admin = await Admin.findById(req.user.id).select('-password');
-    res.json({
-      success: true,
-      data: admin
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-};
-
-// Logout
-exports.logout = (req, res) => {
-  res.json({
-    success: true,
-    message: 'Logged out successfully'
-  });
-};
-// Validate and synchronize an existing staff login session.
 exports.loginSync = async (req, res) => {
   try {
     const token = req.body?.token;
-    if (!token || typeof token !== 'string') {
-      return res.status(400).json({ success: false, message: 'Staff token is required' });
+
+    if (!token || typeof token !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Staff token is required",
+      });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'mysecretkey');
-    if (decoded.type !== 'staff' || !decoded.id) {
-      return res.status(401).json({ success: false, message: 'Invalid staff token' });
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET || "mysecretkey"
+    );
+
+    if (decoded.type !== "staff" || !decoded.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid staff token",
+      });
     }
 
-    const staff = await Staff.findById(decoded.id).select('-password');
+    const staff = await Staff.findById(decoded.id).select("-password");
+
     if (!staff || !staff.isActive) {
-      return res.status(401).json({ success: false, message: 'Staff account is unavailable' });
+      return res.status(401).json({
+        success: false,
+        message: "Staff account is unavailable",
+      });
     }
 
-    const syncId = crypto.randomBytes(24).toString('hex');
+    const syncId = crypto.randomBytes(24).toString("hex");
+    const expiresAt = Date.now() + 60_000;
+
+    const payload = {
+      token,
+      user: {
+        _id: String(staff._id),
+        employeeId: staff.employeeId,
+        employeeName: staff.employeeName,
+        name: staff.name,
+        role: staff.role,
+      },
+      type: "staff",
+    };
+
     pendingWidgetSyncs.set(syncId, {
-      expiresAt: Date.now() + 60_000,
-      payload: { token, user: staff, type: 'staff' }
+      expiresAt,
+      payload: {
+        token,
+        user: staff.toObject(),
+        type: "staff",
+      },
     });
+
     for (const [id, pending] of pendingWidgetSyncs) {
-      if (pending.expiresAt <= Date.now()) pendingWidgetSyncs.delete(id);
+      if (pending.expiresAt <= Date.now()) {
+        pendingWidgetSyncs.delete(id);
+      }
     }
+
+    console.log("Staff login sync created:", {
+      syncId,
+      employeeId: staff.employeeId,
+      employeeName: staff.employeeName,
+    });
 
     return res.json({
       success: true,
-      message: 'Staff login synchronized',
-      type: 'staff',
-      user: staff,
-      token,
-      syncId
+      message: "Staff login synchronized",
+      ...payload,
+      syncId,
     });
   } catch (error) {
-    return res.status(401).json({ success: false, message: 'Invalid or expired staff token' });
+    console.error("Staff login sync failed:", error.message);
+
+    return res.status(401).json({
+      success: false,
+      message: "Invalid or expired staff token",
+    });
   }
 };
 
-// One-time, short-lived handoff consumed by the desktop widget.
 exports.consumeLoginSync = (req, res) => {
   const { syncId } = req.params;
-  const pending = pendingWidgetSyncs.get(syncId);
-  if (!pending || pending.expiresAt <= Date.now()) {
-    pendingWidgetSyncs.delete(syncId);
-    return res.status(404).json({ success: false, message: 'Sync request expired or already used' });
+
+  if (!/^[a-f0-9]{48}$/.test(syncId || "")) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid sync ID",
+    });
   }
 
+  const pending = pendingWidgetSyncs.get(syncId);
+
+  if (!pending || pending.expiresAt <= Date.now()) {
+    pendingWidgetSyncs.delete(syncId);
+
+    return res.status(404).json({
+      success: false,
+      message: "Sync request expired or already used",
+    });
+  }
+
+  // One-time consumption.
   pendingWidgetSyncs.delete(syncId);
-  return res.json({ success: true, data: pending.payload });
+
+  console.log("Staff login sync consumed:", {
+    employeeId: pending.payload.user.employeeId,
+    employeeName: pending.payload.user.employeeName,
+  });
+
+  return res.json({
+    success: true,
+    data: pending.payload,
+  });
 };

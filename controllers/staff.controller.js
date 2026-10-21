@@ -890,7 +890,10 @@ const getAllSessions = async (req, res) => {
         ...session,
         status: liveStatus,
         totalWorkDuration:
-          isToday && session.status === "working" && !activeBreak && session.startTime
+          isToday &&
+          session.status === "working" &&
+          !activeBreak &&
+          session.startTime
             ? Math.max(
                 0,
                 getDurationMinutes(session.startTime, now) -
@@ -980,6 +983,361 @@ const getAllSessions = async (req, res) => {
     });
   }
 };
+
+const getEmployeeAttendanceReport = async (req, res) => {
+  try {
+    const { employeeId, startDate, endDate } = req.query;
+
+    // Validate required fields
+    if (!employeeId || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "employeeId, startDate and endDate are required.",
+      });
+    }
+
+    // Validate YYYY-MM-DD dates
+    const isValidDate = (value) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return false;
+      }
+
+      const date = new Date(`${value}T00:00:00.000Z`);
+
+      return (
+        !Number.isNaN(date.getTime()) &&
+        date.toISOString().slice(0, 10) === value
+      );
+    };
+
+    if (!isValidDate(startDate) || !isValidDate(endDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date. Use YYYY-MM-DD format.",
+      });
+    }
+
+    if (startDate > endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "From Date cannot be after To Date.",
+      });
+    }
+
+    // Create IST day boundaries
+    const getISTDayRange = (dateString) => ({
+      start: new Date(`${dateString}T00:00:00.000+05:30`),
+      end: new Date(`${dateString}T23:59:59.999+05:30`),
+    });
+
+    const start = getISTDayRange(startDate).start;
+    const end = getISTDayRange(endDate).end;
+
+    // Generate dates without UTC/local timezone drift
+    const getNextDate = (dateString) => {
+      const [year, month, day] = dateString.split("-").map(Number);
+
+      const date = new Date(Date.UTC(year, month - 1, day + 1));
+
+      return [
+        date.getUTCFullYear(),
+        String(date.getUTCMonth() + 1).padStart(2, "0"),
+        String(date.getUTCDate()).padStart(2, "0"),
+      ].join("-");
+    };
+
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+
+    // Check employee exists
+    const employee = await Staff.findOne({ employeeId })
+      .select("-password")
+      .lean();
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found.",
+      });
+    }
+
+    // Fetch all sessions for this employee and date range.
+    // Do not paginate this query.
+    const sessions = await WorkSession.find({
+      employeeId,
+      date: {
+        $gte: start,
+        $lte: end,
+      },
+    })
+      .sort({ date: 1, startTime: 1 })
+      .lean();
+
+    // Group sessions by IST date
+    const sessionsByDate = new Map();
+
+    for (const session of sessions) {
+      const dateKey = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date(session.date));
+
+      if (!sessionsByDate.has(dateKey)) {
+        sessionsByDate.set(dateKey, []);
+      }
+
+      sessionsByDate.get(dateKey).push(session);
+    }
+
+    const now = new Date();
+
+    // Office holidays:
+    // Every Sunday and second/fourth Saturday
+    const getHoliday = (dateString) => {
+      const [year, month, day] = dateString.split("-").map(Number);
+
+      const date = new Date(Date.UTC(year, month - 1, day));
+
+      const dayOfWeek = date.getUTCDay();
+      const dayOfMonth = date.getUTCDate();
+      const saturdayNumber = Math.ceil(dayOfMonth / 7);
+
+      if (dayOfWeek === 0) {
+        return "Sunday";
+      }
+
+      if (dayOfWeek === 6 && [2, 4].includes(saturdayNumber)) {
+        return "Saturday Holiday";
+      }
+
+      return null;
+    };
+
+    // Duration fields in WorkSession are assumed to be minutes.
+    const getMinutes = (value) => {
+      const minutes = Number(value);
+      return Number.isFinite(minutes) ? Math.max(0, minutes) : 0;
+    };
+
+    const getElapsedMinutes = (from, to = now) => {
+      if (!from) return 0;
+
+      const startTime = new Date(from).getTime();
+      const endTime = new Date(to).getTime();
+
+      if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) {
+        return 0;
+      }
+
+      return Math.max(0, (endTime - startTime) / 60000);
+    };
+
+    // Calculate working duration for one session.
+    const getSessionWorkMinutes = (session, dateString) => {
+      const storedWork = getMinutes(session.totalWorkDuration);
+
+      // Keep historical/finalized session durations.
+      if (
+        dateString !== today ||
+        session.status === "completed" ||
+        session.endTime ||
+        !session.startTime
+      ) {
+        return storedWork;
+      }
+
+      // Recalculate current day's unfinished session.
+      const elapsed = getElapsedMinutes(session.startTime);
+
+      const breaks = Array.isArray(session.breaks) ? session.breaks : [];
+
+      let breakMinutes = getMinutes(session.totalBreakDuration);
+
+      // Add an active break if it is not already included.
+      const activeBreak =
+        session.currentBreak?.startTime && !session.currentBreak?.endTime
+          ? session.currentBreak
+          : breaks.find((item) => item.startTime && !item.endTime);
+
+      if (activeBreak) {
+        breakMinutes += getElapsedMinutes(activeBreak.startTime);
+      }
+
+      let idleMinutes = getMinutes(session.totalIdleTime);
+
+      // Add current idle time when applicable.
+      if (session.status === "idle" && session.idleStartTime) {
+        idleMinutes += getElapsedMinutes(session.idleStartTime);
+      } else if (
+        session.status === "idle" &&
+        (session.lastActiveTime || session.lastActivityTime)
+      ) {
+        const lastActive = session.lastActiveTime || session.lastActivityTime;
+
+        const idleStart = new Date(new Date(lastActive).getTime() + 5 * 60000);
+
+        if (idleStart < now) {
+          idleMinutes += getElapsedMinutes(idleStart);
+        }
+      }
+
+      return Math.max(0, elapsed - breakMinutes - idleMinutes);
+    };
+
+    const dailyReport = [];
+
+    let totalCalendarDays = 0;
+    let totalScheduledWorkingDays = 0;
+    let totalHolidays = 0;
+    let totalDaysWorked = 0;
+    let totalAbsentDays = 0;
+    let totalUpcomingDays = 0;
+    let totalActualWorkMinutes = 0;
+
+    let totalExpectedWorkMinutes = 0;
+    const REQUIRED_DAILY_MINUTES = 8 * 60;
+
+    let cursor = startDate;
+
+    while (cursor <= endDate) {
+      totalCalendarDays++;
+
+      const holiday = getHoliday(cursor);
+      const daySessions = sessionsByDate.get(cursor) || [];
+
+      const isFuture = cursor > today;
+      const isHoliday = Boolean(holiday);
+
+      let actualMinutes = daySessions.reduce(
+        (sum, session) => sum + getSessionWorkMinutes(session, cursor),
+        0,
+      );
+
+      actualMinutes = Math.round(actualMinutes);
+
+      const hasWorkRecord = daySessions.some(
+        (session) => getSessionWorkMinutes(session, cursor) > 0,
+      );
+
+      let status;
+
+      if (isHoliday) {
+        status = "holiday";
+        totalHolidays++;
+      } else if (isFuture) {
+        status = "upcoming";
+        totalUpcomingDays++;
+      } else {
+        totalScheduledWorkingDays++;
+        totalExpectedWorkMinutes += REQUIRED_DAILY_MINUTES;
+
+        if (hasWorkRecord) {
+          status = daySessions.some(
+            (session) => !session.endTime && session.status !== "completed",
+          )
+            ? "in_progress"
+            : "present";
+
+          totalDaysWorked++;
+        } else {
+          status = "absent";
+          totalAbsentDays++;
+        }
+      }
+
+      // Holidays do not count as expected working days.
+      // Future dates are excluded from expected hours.
+      totalActualWorkMinutes += actualMinutes;
+
+      const expectedMinutes =
+        !isHoliday && !isFuture ? REQUIRED_DAILY_MINUTES : 0;
+
+      dailyReport.push({
+        date: cursor,
+        day: new Intl.DateTimeFormat("en-IN", {
+          timeZone: "Asia/Kolkata",
+          weekday: "long",
+        }).format(new Date(`${cursor}T12:00:00+05:30`)),
+        status,
+        holiday: holiday || null,
+        sessionCount: daySessions.length,
+        workingMinutes: actualMinutes,
+        workingHours: Number((actualMinutes / 60).toFixed(2)),
+        expectedMinutes,
+        expectedHours: expectedMinutes / 60,
+        shortfallMinutes: Math.max(0, expectedMinutes - actualMinutes),
+        sessions: daySessions.map((session) => ({
+          _id: session._id,
+          startTime: session.startTime || null,
+          endTime: session.endTime || null,
+          status: session.status || "not_started",
+        })),
+      });
+
+      cursor = getNextDate(cursor);
+    }
+
+    const totalShortfallMinutes = dailyReport.reduce(
+      (sum, day) => sum + day.shortfallMinutes,
+      0,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Employee attendance report fetched successfully.",
+      data: {
+        employee: {
+          employeeId: employee.employeeId,
+          employeeName: employee.employeeName,
+          email: employee.email,
+        },
+
+        dateRange: {
+          startDate,
+          endDate,
+        },
+
+        summary: {
+          totalCalendarDays,
+          totalScheduledWorkingDays,
+          totalHolidays,
+          totalDaysWorked,
+          totalAbsentDays,
+          totalUpcomingDays,
+
+          requiredHoursPerDay: 8,
+
+          totalExpectedWorkHours: Number(
+            (totalExpectedWorkMinutes / 60).toFixed(2),
+          ),
+
+          totalActualWorkHours: Number(
+            (totalActualWorkMinutes / 60).toFixed(2),
+          ),
+
+          totalShortfallHours: Number((totalShortfallMinutes / 60).toFixed(2)),
+        },
+
+        dailyReport,
+      },
+    });
+  } catch (error) {
+    console.error("Get employee attendance report error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate employee attendance report.",
+      error: error.message,
+    });
+  }
+};
+
 // ==================== ADMIN BREAK SUMMARY ====================
 const getBreakSummary = async (req, res) => {
   try {
@@ -2535,6 +2893,299 @@ const getEmployeeSessionTracking = async (req, res) => {
   }
 };
 
+const IST = "Asia/Kolkata";
+const REQUIRED_HOURS_PER_DAY = 8;
+
+function parseDate(dateString) {
+  if (!dateString || !/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+    return null;
+  }
+
+  const [year, month, day] = dateString.split("-").map(Number);
+  const utcDate = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    utcDate.getUTCFullYear() !== year ||
+    utcDate.getUTCMonth() !== month - 1 ||
+    utcDate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  // Midnight IST = previous day at 18:30 UTC.
+  return new Date(Date.UTC(year, month - 1, day) - 330 * 60 * 1000);
+}
+
+function getNextDay(date) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next;
+}
+
+function dateKey(date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: IST,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function getHoliday(dateString) {
+  const [year, month, day] = dateString.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const weekday = date.getUTCDay();
+  const weekNumber = Math.ceil(day / 7);
+
+  if (weekday === 0) return "Sunday";
+
+  if (weekday === 6 && [2, 4].includes(weekNumber)) {
+    return "Saturday Holiday";
+  }
+
+  return null;
+}
+
+function getScheduledDays(startDate, endDate) {
+  const days = [];
+  const cursor = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+
+  while (cursor <= end) {
+    const day = cursor.toISOString().slice(0, 10);
+
+    if (!getHoliday(day)) days.push(day);
+
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  return days;
+}
+
+function getSalaryValue(staff) {
+  // Confirm the actual salary field in your Staff schema.
+  const candidates = [
+    staff.monthlySalary,
+    staff.salary,
+    staff.salaryDetails?.monthlySalary,
+    staff.compensation?.monthlySalary,
+  ];
+
+  const value = candidates.find(
+    (item) => item !== undefined && item !== null && item !== "",
+  );
+
+  if (value === undefined) return null;
+
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+}
+
+function round2(value) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function getTotalHours(session, now) {
+  if (!session.startTime) return 0;
+
+  const start = new Date(session.startTime);
+  const end = session.endTime ? new Date(session.endTime) : now;
+
+  if (
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime()) ||
+    end < start
+  ) {
+    return 0;
+  }
+
+  return (end.getTime() - start.getTime()) / 3600000;
+}
+
+const getWorkSalaryReport = async (req, res) => {
+  try {
+    const { employeeId, startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "startDate and endDate are required (YYYY-MM-DD).",
+      });
+    }
+
+    const start = parseDate(startDate);
+    const end = parseDate(endDate);
+
+    if (!start || !end || start > end) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide valid dates and ensure startDate <= endDate.",
+      });
+    }
+
+    const now = new Date();
+    const today = dateKey(now);
+    const endExclusive = getNextDay(end);
+
+    const sessionFilter = {
+      date: { $gte: start, $lt: endExclusive },
+    };
+
+    if (employeeId) {
+      sessionFilter.employeeId = employeeId;
+    }
+
+    const [staffList, sessions] = await Promise.all([
+      Staff.find(employeeId ? { employeeId } : {})
+        .select("-password")
+        .lean(),
+
+      WorkSession.find(sessionFilter)
+        .select(
+          "employeeId employeeName date startTime endTime totalWorkDuration status",
+        )
+        .lean(),
+    ]);
+
+    const scheduledDays = getScheduledDays(startDate, endDate);
+    const scheduledDaySet = new Set(scheduledDays);
+
+    const sessionsByEmployee = new Map();
+
+    for (const session of sessions) {
+      if (!sessionsByEmployee.has(session.employeeId)) {
+        sessionsByEmployee.set(session.employeeId, new Map());
+      }
+
+      const dayMap = sessionsByEmployee.get(session.employeeId);
+      const day = dateKey(session.date);
+
+      if (!dayMap.has(day)) {
+        dayMap.set(day, []);
+      }
+
+      dayMap.get(day).push(session);
+    }
+
+    const report = staffList.map((staff) => {
+      const id = staff.employeeId;
+      const dayMap = sessionsByEmployee.get(id) || new Map();
+
+      let totalWorkingDays = 0;
+      let totalWorkingMinutes = 0;
+      let totalElapsedHours = 0;
+
+      for (const day of scheduledDays) {
+        const daySessions = dayMap.get(day) || [];
+
+        const attended = daySessions.some((session) =>
+          Boolean(session.startTime),
+        );
+
+        if (attended) {
+          totalWorkingDays++;
+        }
+
+        for (const session of daySessions) {
+          if (session.startTime) {
+            totalElapsedHours += getTotalHours(session, now);
+          }
+
+          totalWorkingMinutes += Math.max(
+            0,
+            Number(session.totalWorkDuration) || 0,
+          );
+        }
+      }
+
+      const monthlySalary = getSalaryValue(staff);
+
+      let periodSalary = null;
+      let payableSalary = null;
+
+      if (monthlySalary !== null) {
+        const months = new Set(scheduledDays.map((day) => day.slice(0, 7)));
+
+        let salaryForPeriod = 0;
+        let absenceDeduction = 0;
+
+        for (const monthKey of months) {
+          const [year, month] = monthKey.split("-").map(Number);
+          const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+          const monthStart = `${monthKey}-01`;
+          const monthEnd = `${monthKey}-${String(daysInMonth).padStart(2, "0")}`;
+
+          const scheduledDaysInMonth = getScheduledDays(
+            monthStart,
+            monthEnd,
+          ).length;
+
+          const scheduledDaysInPeriod = scheduledDays.filter(
+            (day) => day.startsWith(monthKey) && day <= today,
+          ).length;
+
+          if (!scheduledDaysInMonth) continue;
+
+          const dailyRate = monthlySalary / scheduledDaysInMonth;
+
+          salaryForPeriod += dailyRate * scheduledDaysInPeriod;
+
+          const absentInMonth = scheduledDays.filter((day) => {
+            if (!day.startsWith(monthKey) || day >= today) {
+              return false;
+            }
+
+            const attended = (dayMap.get(day) || []).some((session) =>
+              Boolean(session.startTime),
+            );
+
+            return !attended;
+          }).length;
+
+          absenceDeduction += dailyRate * absentInMonth;
+        }
+
+        periodSalary = round2(salaryForPeriod);
+        payableSalary = round2(Math.max(0, salaryForPeriod - absenceDeduction));
+      }
+
+      return {
+        employeeId: id,
+        employeeName:
+          staff.employeeName ||
+          staff.name ||
+          staff.fullName ||
+          sessions.find((s) => s.employeeId === id)?.employeeName ||
+          "Unknown",
+
+        totalWorkingDays,
+        totalScheduledWorkingDays: scheduledDaySet.size,
+        totalHours: round2(totalElapsedHours),
+        totalWorkingHours: round2(totalWorkingMinutes / 60),
+        totalSalary: monthlySalary,
+        periodSalary,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Employee work and salary report fetched successfully.",
+      dateRange: { startDate, endDate },
+      count: report.length,
+      data: report,
+    });
+  } catch (error) {
+    console.error("Work salary report error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch employee work and salary report.",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createStaff,
   getAllStaff,
@@ -2568,4 +3219,5 @@ module.exports = {
   getBreakHistory,
   getBreakSummary,
   getEmployeeSessionTracking,
+  getWorkSalaryReport,
 };

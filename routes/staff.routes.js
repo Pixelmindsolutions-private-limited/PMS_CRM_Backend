@@ -58,7 +58,8 @@ const {
   getAllSessions ,
   getBreakSummary,
   getBreakHistory,
-  getEmployeeSessionTracking
+  getEmployeeSessionTracking,
+  getWorkSalaryReport,
 
 } = require('../controllers/staff.controller');
 
@@ -76,11 +77,13 @@ router.get('/face-health', checkFaceHealth);
 router.post('/create', staffCreationFields, createStaff);
 router.get('/metadata', getMetadata);
 router.get('/all', getAllStaff);
+router.get("/work-salary-report", getWorkSalaryReport);
 router.get('/all-sessions', getAllSessions);
 router.get('/break-summary',  getBreakSummary);
 router.get('/break-history', getBreakHistory);
 router.get('/employee-sessions/:employeeId', getEmployeeSessionTracking);
 router.get('/options', getStaffOptions);
+
 
 
 // ==================== PROTECTED ROUTES (Auth Required) ====================
