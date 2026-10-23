@@ -34,17 +34,17 @@ router.get('/current-status/:employeeId', staffOnly, ownStaffId, getCurrentStatu
 router.get('/session-status', staffOnly, ownStaffId, getCurrentStatus);
 router.get('/reminder-status', staffOnly, ownStaffId, getCurrentStatus);
 router.get('/active-employees', adminOnly, getActiveEmployees);
-router.get('/all-sessions', (req, res, next) => {
-  if (req.user.type === 'admin') {
-    return getAllSessionsAdmin(req, res, next);
-  }
-  if (req.user.type === 'staff') {
-    req.params.employeeId = String(req.user.employeeId);
-    return getAllSessions(req, res, next);
-  }
-  return res.status(403).json({
-    success: false,
-    message: 'Access denied.'
-  });
-});
+// router.get('/all-sessions', (req, res, next) => {
+//   if (req.user.type === 'admin') {
+//     return getAllSessionsAdmin(req, res, next);
+//   }
+//   if (req.user.type === 'staff') {
+//     req.params.employeeId = String(req.user.employeeId);
+//     return getAllSessions(req, res, next);
+//   }
+//   return res.status(403).json({
+//     success: false,
+//     message: 'Access denied.'
+//   });
+// });
 module.exports = router;

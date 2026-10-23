@@ -12,6 +12,7 @@ const fs = require("fs");
 
 const app = express();
 const startAutoEndWork = require("./cron/autoEndWork");
+const { startIdleDetection } = require("./controllers/WorkSession.controller");
 
 // Load environment variables
 require("dotenv").config();
@@ -295,6 +296,7 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   startAutoEndWork(); // Start midnight auto-end scheduler
+  startIdleDetection(); // Reconcile idle sessions even without client heartbeats
   console.log(`📝 Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(`🌐 Base URL: ${BASE_URL}`);
   console.log(`📁 Uploads path: ${uploadsPath}`);

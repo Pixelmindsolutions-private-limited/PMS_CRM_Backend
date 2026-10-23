@@ -861,6 +861,14 @@ const getAllSessions = async (req, res) => {
 
       let liveStatus = session.status || "not_started";
 
+      // Past date sessions should never show live status.
+      const isPastDate =
+        !isToday && getISTDateString(new Date(session.date)) < today;
+
+      if (isPastDate && session.status !== "not_started") {
+        liveStatus = "completed";
+      }
+
       // Only today's unfinished sessions get a live status.
       if (isToday && session.status !== "completed") {
         if (activeBreak) {

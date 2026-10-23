@@ -1395,6 +1395,8 @@ const WorkSession = require("../models/Worksession");
 const { Staff } = require("../models/Staff");
 
 const activeBreaks = new Map();
+let idleDetectionTimer = null;
+let idleDetectionRunning = false;
 
 // ============ IST HELPERS ============
 
@@ -1529,56 +1531,8 @@ const reconcileSession = async (session, now = new Date()) => {
 
   let changed = false;
 
-  // 1. Automatically end an expired scheduled break.
-  if (session.status === "on_break" && session.currentBreak?.expectedEndTime) {
-    const expectedEnd = new Date(session.currentBreak.expectedEndTime);
-
-    if (expectedEnd <= now) {
-      const breakStart = new Date(session.currentBreak.startTime);
-
-      const breakMinutes = Math.max(
-        0,
-        (expectedEnd.getTime() - breakStart.getTime()) / 60000,
-      );
-
-      session.totalBreakDuration =
-        (Number(session.totalBreakDuration) || 0) + breakMinutes;
-
-      session.currentBreak.status = "ended";
-      session.currentBreak.endTime = expectedEnd;
-      session.currentBreak.duration = breakMinutes;
-
-      // Update the matching active break only.
-      const activeBreak = session.breaks?.find(
-        (item) =>
-          item.status === "active" &&
-          item.startTime &&
-          new Date(item.startTime).getTime() === breakStart.getTime(),
-      );
-
-      if (activeBreak) {
-        activeBreak.status = "ended";
-        activeBreak.endTime = expectedEnd;
-        activeBreak.duration = breakMinutes;
-      }
-
-      session.activityLogs.push({
-        timestamp: expectedEnd,
-        type: "break_end",
-        details: "Break ended after scheduled duration",
-      });
-
-      session.currentBreak = null;
-      session.status = "working";
-      session.lastActiveTime = expectedEnd;
-      session.idleStartTime = null;
-      session.idlePopupShown = false;
-
-      changed = true;
-    }
-  }
-
-  // 2. Start idle only once when the inactivity threshold is reached.
+  // Active breaks remain on break until the employee ends the break.
+  // Start idle only once when the inactivity threshold is reached.
   if (session.status === "working") {
     const lastActive = new Date(
       session.lastActiveTime || session.startTime || now,
@@ -1589,9 +1543,10 @@ const reconcileSession = async (session, now = new Date()) => {
     if (inactiveMs >= thresholdMs) {
       const idleStart = new Date(lastActive.getTime() + thresholdMs);
 
+      const logs = session.activityLogs || [];
       // Prevent duplicate idle transitions if this period was
       // already recorded in the activity logs.
-      const alreadyLogged = session.activityLogs?.some(
+      const alreadyLogged = logs.some(
         (log) =>
           log.type === "idle_start" &&
           new Date(log.timestamp).getTime() === idleStart.getTime(),
@@ -1609,15 +1564,14 @@ const reconcileSession = async (session, now = new Date()) => {
       }
 
       // Show one popup for this idle period.
-      if (!session.idlePopupShown) {
+      const popupAlreadyLogged = logs.some(
+        (log) =>
+          log.type === "idle_popup_shown" &&
+          new Date(log.timestamp).getTime() === idleStart.getTime(),
+      );
+
+      if (!session.idlePopupShown || !popupAlreadyLogged) {
         session.idlePopupShown = true;
-
-        const popupAlreadyLogged = session.activityLogs?.some(
-          (log) =>
-            log.type === "idle_popup_shown" &&
-            new Date(log.timestamp).getTime() === idleStart.getTime(),
-        );
-
         if (!popupAlreadyLogged) {
           session.activityLogs.push({
             timestamp: idleStart,
@@ -1648,6 +1602,33 @@ const reconcileSession = async (session, now = new Date()) => {
   return session;
 };
 
+const startIdleDetection = () => {
+  if (idleDetectionTimer) return idleDetectionTimer;
+
+  const reconcileWorkingSessions = async () => {
+    if (idleDetectionRunning) return;
+    idleDetectionRunning = true;
+
+    try {
+      const now = new Date();
+      const sessions = await WorkSession.find({ status: "working" });
+
+      for (const session of sessions) {
+        await reconcileSession(session, now);
+      }
+    } catch (error) {
+      console.error("Idle detection error:", error);
+    } finally {
+      idleDetectionRunning = false;
+    }
+  };
+
+  idleDetectionTimer = setInterval(reconcileWorkingSessions, 5000);
+  idleDetectionTimer.unref?.();
+  reconcileWorkingSessions();
+
+  return idleDetectionTimer;
+};
 // @desc    Start work session
 const startWork = async (req, res) => {
   try {
@@ -1929,7 +1910,8 @@ const updateActivity = async (req, res) => {
       }
 
       x.status = "working";
-      x.idleStartTime = null;
+      // Retain the last idle start timestamp. Status and lastActiveTime
+      // determine whether a new idle period is active.
       x.idlePopupShown = false;
       x.lastActiveTime = now;
 
@@ -2344,10 +2326,8 @@ const finalizeWorkSession = async (
   // End an active break
   if (x.currentBreak?.status === "active") {
     const br = x.currentBreak;
-    const endAt =
-      br.expectedEndTime && new Date(br.expectedEndTime) < now
-        ? new Date(br.expectedEndTime)
-        : now;
+    // Count the full actual break, including time beyond expectedEndTime.
+    const endAt = now;
 
     br.endTime = endAt;
     br.duration = Math.max(
@@ -2371,19 +2351,20 @@ const finalizeWorkSession = async (
     x.totalBreakDuration = (Number(x.totalBreakDuration) || 0) + br.duration;
   }
 
-  // Finalize ongoing idle time
+  // Finalize ongoing idle time once, through the actual work end time.
   if (x.status === "idle" && x.idleStartTime) {
-    x.totalIdleTime =
-      (Number(x.totalIdleTime) || 0) +
-      Math.max(
-        0,
-        (now.getTime() - new Date(x.idleStartTime).getTime()) / 60000,
-      );
+    const idleMinutes = Math.max(
+      0,
+      (now.getTime() - new Date(x.idleStartTime).getTime()) / 60000,
+    );
+    x.totalIdleTime = (Number(x.totalIdleTime) || 0) + idleMinutes;
   }
 
+  const elapsedMinutes =
+    (now.getTime() - new Date(x.startTime).getTime()) / 60000;
   x.totalWorkDuration = Math.max(
     0,
-    (now.getTime() - new Date(x.startTime).getTime()) / 60000 -
+    elapsedMinutes -
       (Number(x.totalBreakDuration) || 0) -
       (Number(x.totalIdleTime) || 0),
   );
@@ -3186,6 +3167,7 @@ const getTodayTimeline = async (req, res) => {
 };
 
 module.exports = {
+  startIdleDetection,
   startWork,
   updateActivity,
   reportIdle,
