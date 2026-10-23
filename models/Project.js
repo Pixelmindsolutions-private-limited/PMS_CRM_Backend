@@ -190,6 +190,12 @@ const installmentSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    // SAC/service accounting code used on the invoice
+    sacCode: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
     // Optional taxes, default to 0%
     gstPercent: {

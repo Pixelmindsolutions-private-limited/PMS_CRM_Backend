@@ -332,45 +332,62 @@ exports.updateManualInvoice = async (req, res) => {
 
 // ============ DELETE MANUAL INVOICE ============
 exports.deleteManualInvoice = async (req, res) => {
-    try {
-        const { id } = req.params;
+  try {
+    const { id } = req.params;
 
-        const invoice = await ManualInvoice.findById(id);
-
-        if (!invoice) {
-            return res.status(404).json({
-                success: false,
-                message: 'Invoice not found'
-            });
-        }
-
-        // Delete PDF file if exists
-        if (invoice.invoicePdf && fs.existsSync(invoice.invoicePdf)) {
-            fs.unlinkSync(invoice.invoicePdf);
-        }
-
-        await ManualInvoice.findByIdAndDelete(id);
-
-        res.json({
-            success: true,
-            message: 'Invoice deleted successfully'
-        });
-
-    } catch (error) {
-        console.error('Delete manual invoice error:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice ID is required",
+      });
     }
-};
 
+    let invoice = await ManualInvoice.findById(id);
+    let invoiceModel = ManualInvoice;
+
+    if (!invoice) {
+      invoice = await Invoice.findById(id);
+      invoiceModel = Invoice;
+    }
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        message: "Invoice not found",
+      });
+    }
+
+    // Delete the PDF file if it exists
+    if (invoice.invoicePdf && fs.existsSync(invoice.invoicePdf)) {
+      fs.unlinkSync(invoice.invoicePdf);
+    }
+
+    // Delete invoice from database
+    await invoiceModel.findByIdAndDelete(id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Invoice and associated PDF deleted successfully",
+      data: {
+        invoiceId: id,
+        invoiceNumber: invoice.invoiceNumber,
+      },
+    });
+  } catch (error) {
+    console.error("Delete manual invoice error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to delete invoice",
+    });
+  }
+};
 // ============ DOWNLOAD INVOICE PDF ============
 exports.downloadInvoicePDF = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const invoice = await Invoice.findById(id);
+        const invoice = (await ManualInvoice.findById(id)) || (await Invoice.findById(id));
 
         if (!invoice) {
             return res.status(404).json({

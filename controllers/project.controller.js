@@ -2127,6 +2127,7 @@ exports.addProjectInstallment = async (req, res) => {
       sgstPercent = 0,
       dueDate = null,
       paymentDate = null,
+      sacCode = "", // ADD THIS
       status = "pending",
       notes = "",
     } = req.body;
@@ -2261,7 +2262,8 @@ exports.addProjectInstallment = async (req, res) => {
         if (nameMatches.length > 1) {
           return res.status(400).json({
             success: false,
-            message: "Multiple clients match this project name; link the correct clientId before generating an invoice",
+            message:
+              "Multiple clients match this project name; link the correct clientId before generating an invoice",
           });
         }
       }
@@ -2361,18 +2363,24 @@ exports.addProjectInstallment = async (req, res) => {
           project.clientId &&
           mongoose.Types.ObjectId.isValid(String(project.clientId))
         ) {
-          transactionClient = await Client.findById(project.clientId).session(session);
+          transactionClient = await Client.findById(project.clientId).session(
+            session,
+          );
         }
         if (!transactionClient && client && !createClientFromProject) {
-          transactionClient = await Client.findById(client._id).session(session);
+          transactionClient = await Client.findById(client._id).session(
+            session,
+          );
         }
         if (!transactionClient && createClientFromProject) {
           const [createdClient] = await Client.create(
-            [{
-              name: String(project.clientName).trim(),
-              email: String(project.mailId || "").trim(),
-              mobile: String(project.mobileNumber || "").trim(),
-            }],
+            [
+              {
+                name: String(project.clientName).trim(),
+                email: String(project.mailId || "").trim(),
+                mobile: String(project.mobileNumber || "").trim(),
+              },
+            ],
             { session },
           );
           transactionClient = createdClient;
@@ -2385,6 +2393,7 @@ exports.addProjectInstallment = async (req, res) => {
           title: String(title).trim(),
           type,
           value: amountValue,
+          sacCode: String(sacCode || "").trim(), // ADD THIS
           gstPercent: gstRate,
           sgstPercent: sgstRate,
           gstAmount,
@@ -2412,6 +2421,7 @@ exports.addProjectInstallment = async (req, res) => {
             clientId: client._id,
             installmentId: savedInstallment._id,
             installmentTitle: savedInstallment.title,
+            sacCode: savedInstallment.sacCode,
             amount: Number(principalAmount.toFixed(2)),
             tax: Number((gstAmount + sgstAmount).toFixed(2)),
             totalAmount,
@@ -2422,6 +2432,9 @@ exports.addProjectInstallment = async (req, res) => {
                 ? savedInstallment.paymentDate || new Date()
                 : null,
           });
+          await invoice.save({ session });
+        } else if (!invoice.sacCode && savedInstallment.sacCode) {
+          invoice.sacCode = savedInstallment.sacCode;
           await invoice.save({ session });
         }
 
@@ -2537,27 +2550,48 @@ exports.getAllInvoices = async (req, res) => {
   try {
     const { page = 1, limit = 10, search = "", status } = req.query;
 
+    // =========================================
+    // 1. Pagination
+    // =========================================
     const pageNumber = Math.max(1, Number(page) || 1);
-    const limitNumber = Math.max(1, Number(limit) || 10);
+    const limitNumber = Math.min(Math.max(1, Number(limit) || 10), 100);
 
+    // =========================================
+    // 2. Invoice filters
+    // =========================================
     const filter = {};
 
     if (["generated", "sent", "paid", "overdue"].includes(status)) {
       filter.status = status;
     }
 
+    // =========================================
+    // 3. Fetch invoices with project and client
+    // =========================================
     const invoices = await Invoice.find(filter)
       .populate("projectId")
       .populate("clientId")
       .sort({ createdAt: -1 })
       .lean();
 
-    const searchText = search.trim().toLowerCase();
+    // =========================================
+    // 4. Search invoices
+    // =========================================
+    const searchText = String(search || "")
+      .trim()
+      .toLowerCase();
 
     const filteredInvoices = searchText
       ? invoices.filter((invoice) => {
-          const project = invoice.projectId || {};
-          const client = invoice.clientId || {};
+          const project =
+            invoice.projectId && typeof invoice.projectId === "object"
+              ? invoice.projectId
+              : {};
+
+          const client =
+            invoice.clientId && typeof invoice.clientId === "object"
+              ? invoice.clientId
+              : {};
 
           return [
             invoice.invoiceNumber,
@@ -2566,6 +2600,8 @@ exports.getAllInvoices = async (req, res) => {
             project.projectName,
             client.name,
             client.clientName,
+            client.email,
+            client.mobile,
           ].some((value) =>
             String(value || "")
               .toLowerCase()
@@ -2574,19 +2610,111 @@ exports.getAllInvoices = async (req, res) => {
         })
       : invoices;
 
-    const total = filteredInvoices.length;
+    // =========================================
+    // 5. Add project, client and installment data
+    // =========================================
+    const enrichedInvoices = filteredInvoices.map((invoice) => {
+      const project =
+        invoice.projectId && typeof invoice.projectId === "object"
+          ? invoice.projectId
+          : null;
+
+      const client =
+        invoice.clientId && typeof invoice.clientId === "object"
+          ? invoice.clientId
+          : null;
+
+      // Find the exact installment linked to this invoice
+      const installment = Array.isArray(project?.installments)
+        ? project.installments.find(
+            (item) => String(item._id) === String(invoice.installmentId),
+          )
+        : null;
+
+      const installmentAmount = Number(invoice.amount || 0);
+
+      // GST and SGST values are stored on the project installment
+      const gstAmount = Number(installment?.gstAmount ?? 0);
+
+      const sgstAmount = Number(installment?.sgstAmount ?? 0);
+
+      const projectCost = Number(project?.projectCost ?? 0);
+
+      const totalPaid = Number(project?.totalPaid ?? 0);
+
+      const remainingCost = Number(
+        project?.remainingAmount ?? Math.max(projectCost - totalPaid, 0),
+      );
+
+      return {
+        ...invoice,
+
+        // Project details
+        projectName: project?.projectName || "",
+        projectCode: project?.projectId || "",
+        projectCost,
+        totalPaid,
+        remainingCost,
+
+        // Client details
+        clientName: client?.name || project?.clientName || "",
+        clientMobile: client?.mobile || project?.mobileNumber || "",
+        clientEmail: client?.email || project?.mailId || "",
+        clientAddress: client?.address || "",
+
+        // Installment details
+        installmentId: invoice.installmentId,
+        installmentTitle:
+          invoice.installmentTitle ||
+          installment?.title ||
+          "Project Installment",
+
+        installmentCost: installmentAmount,
+        subtotal: installmentAmount,
+
+        // Tax breakdown
+        gstPercent: Number(installment?.gstPercent ?? 0),
+        sgstPercent: Number(installment?.sgstPercent ?? 0),
+        gstAmount,
+        sgstAmount,
+
+        // Notes
+        notes: installment?.notes || "",
+
+        // Invoice total
+        totalAmount: Number(
+          invoice.totalAmount ?? installmentAmount + gstAmount + sgstAmount,
+        ),
+      };
+    });
+
+    // =========================================
+    // 6. Pagination after search
+    // =========================================
+    const total = enrichedInvoices.length;
+
     const startIndex = (pageNumber - 1) * limitNumber;
 
+    const paginatedInvoices = enrichedInvoices.slice(
+      startIndex,
+      startIndex + limitNumber,
+    );
+
+    // =========================================
+    // 7. Response
+    // =========================================
     return res.status(200).json({
       success: true,
       message: "Invoices fetched successfully",
+
       pagination: {
         total,
         page: pageNumber,
         limit: limitNumber,
         totalPages: Math.ceil(total / limitNumber),
       },
-      data: filteredInvoices.slice(startIndex, startIndex + limitNumber),
+
+      data: paginatedInvoices,
     });
   } catch (error) {
     console.error("Get all invoices error:", error);

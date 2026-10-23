@@ -302,10 +302,10 @@ async function buildInvoiceHTML({ invoice, project, client }) {
     const companySub = restParts.join(' ') || 'Solutions Pvt Ltd';
 
     const gstNumber = process.env.COMPANY_GST || '36AAPCP4657A1ZA';
-    const companyPhone = process.env.COMPANY_PHONE || '+919949537749';
+    const companyPhone = process.env.COMPANY_PHONE || '+919052097475';
     const companyEmail = process.env.COMPANY_EMAIL || 'info@pixelmindsolutions.com';
     const companyWebsite = process.env.COMPANY_WEBSITE || 'www.pixelmindsolutions.com';
-    const companyLocation = process.env.COMPANY_LOCATION || 'Hyderabad';
+    const companyLocation = process.env.COMPANY_LOCATION || '1st Floor, Siri Residency, Plot No 63, 101,KPHB 5th Phase, Kukatpally, Hyderabad, Telangana 500085';
     const directorName = process.env.COMPANY_DIRECTOR || 'K.Narasimha Varma';
 
     const logoSrc = await getLogoSrc();
