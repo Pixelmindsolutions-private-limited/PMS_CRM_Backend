@@ -1,5 +1,6 @@
 // controllers/manualinvoice.controller.js
 const ManualInvoice = require('../models/manualInvoice');
+const Invoice = require('../models/Invoice');
 const fs = require('fs');
 const path = require('path');
 const { generateManualInvoicePDF } = require('../services/manualpdfService');
@@ -369,7 +370,7 @@ exports.downloadInvoicePDF = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const invoice = await ManualInvoice.findById(id);
+        const invoice = await Invoice.findById(id);
 
         if (!invoice) {
             return res.status(404).json({

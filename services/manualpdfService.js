@@ -1,66 +1,73 @@
 // services/pdfService.js
-const puppeteer = require('puppeteer');
-const fs = require('fs');
-const path = require('path');
+const puppeteer = require("puppeteer");
+const fs = require("fs");
+const path = require("path");
 
 // ============ LOGO LOADER ============
 async function getLogoSrc() {
-    const candidatePaths = [
-        path.join(__dirname, '../uploads/image (18).png'),
-        path.join(__dirname, '../uploads/image (18).png'),
-        path.join(__dirname, '../uploads', 'image (18).png'),
-        path.join(process.cwd(), 'uploads/image (18).png'),
-        process.env.COMPANY_LOGO_PATH || ''
-    ].filter(Boolean);
+  const candidatePaths = [
+    path.join(__dirname, "../uploads/image (18).png"),
+    path.join(__dirname, "../uploads/image (18).png"),
+    path.join(__dirname, "../uploads", "image (18).png"),
+    path.join(process.cwd(), "uploads/image (18).png"),
+    process.env.COMPANY_LOGO_PATH || "",
+  ].filter(Boolean);
 
-    const logoPath = candidatePaths.find(p => fs.existsSync(p));
+  const logoPath = candidatePaths.find((p) => fs.existsSync(p));
 
-    if (logoPath) {
-        try {
-            const logoBase64 = fs.readFileSync(logoPath).toString('base64');
-            const ext = (path.extname(logoPath).replace('.', '') || 'png').toLowerCase();
-            const mime = ext === 'jpg' ? 'jpeg' : ext;
-            console.log(`✅ Logo loaded from: ${logoPath}`);
-            return `data:image/${mime};base64,${logoBase64}`;
-        } catch (err) {
-            console.error(`⚠️ Logo file found but failed to read:`, err.message);
-            return null;
-        }
+  if (logoPath) {
+    try {
+      const logoBase64 = fs.readFileSync(logoPath).toString("base64");
+      const ext = (
+        path.extname(logoPath).replace(".", "") || "png"
+      ).toLowerCase();
+      const mime = ext === "jpg" ? "jpeg" : ext;
+      console.log(`✅ Logo loaded from: ${logoPath}`);
+      return `data:image/${mime};base64,${logoBase64}`;
+    } catch (err) {
+      console.error(`⚠️ Logo file found but failed to read:`, err.message);
+      return null;
     }
+  }
 
-    console.warn('⚠️ No logo found. Using text fallback.');
-    return null;
+  console.warn("⚠️ No logo found. Using text fallback.");
+  return null;
 }
 
 // ============ BUILD MANUAL INVOICE HTML ============
 // services/pdfService.js - Updated buildManualInvoiceHTML function
 
 async function buildManualInvoiceHTML(invoice) {
-    const companyName = process.env.COMPANY_NAME || 'Pixelmind Solutions Pvt Ltd';
-    const [companyFirst, ...restParts] = companyName.split(' ');
-    const companySub = restParts.join(' ') || 'Solutions Pvt Ltd';
+  const companyName = process.env.COMPANY_NAME || "Pixelmind Solutions Pvt Ltd";
+  const [companyFirst, ...restParts] = companyName.split(" ");
+  const companySub = restParts.join(" ") || "Solutions Pvt Ltd";
 
-    const gstNumber = process.env.COMPANY_GST || '36AAPCP4657A1ZA';
-    const companyPhone = process.env.COMPANY_PHONE || '+919949537749';
-    const companyEmail = process.env.COMPANY_EMAIL || 'info@pixelmindsolutions.com';
-    const companyWebsite = process.env.COMPANY_WEBSITE || 'www.pixelmindsolutions.com';
-    const companyLocation = process.env.COMPANY_LOCATION || 'Hyderabad';
-    const directorName = process.env.COMPANY_DIRECTOR || 'K.Narasimha Varma';
+  const gstNumber = process.env.COMPANY_GST || "36AAPCP4657A1ZA";
+  const companyPhone = process.env.COMPANY_PHONE || "+919949537749";
+  const companyEmail =
+    process.env.COMPANY_EMAIL || "info@pixelmindsolutions.com";
+  const companyWebsite =
+    process.env.COMPANY_WEBSITE || "www.pixelmindsolutions.com";
+  const companyLocation = process.env.COMPANY_LOCATION || "Hyderabad";
+  const directorName = process.env.COMPANY_DIRECTOR || "K.Narasimha Varma";
 
-    const logoSrc = await getLogoSrc();
-    
-    const logoHTML = logoSrc ? 
-        `<div class="logo-box"><img src="${logoSrc}" alt="${companyName}"></div>` : 
-        `<div class="logo-box" style="background:#ffffff; border-radius:50%; display:flex; align-items:center; justify-content:center;">
-            <span style="font-size:22pt; font-weight:bold; color:#146356;">${companyFirst.substring(0,2).toUpperCase()}</span>
+  const logoSrc = await getLogoSrc();
+
+  const logoHTML = logoSrc
+    ? `<div class="logo-box"><img src="${logoSrc}" alt="${companyName}"></div>`
+    : `<div class="logo-box" style="background:#ffffff; border-radius:50%; display:flex; align-items:center; justify-content:center;">
+            <span style="font-size:22pt; font-weight:bold; color:#146356;">${companyFirst.substring(0, 2).toUpperCase()}</span>
          </div>`;
 
-    const dateStr = new Date(invoice.date || Date.now())
-        .toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+  const dateStr = new Date(invoice.date || Date.now()).toLocaleDateString(
+    "en-IN",
+    { day: "numeric", month: "long", year: "numeric" },
+  );
 
-    const fmt = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+  const fmt = (n) =>
+    `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
 
-    return `
+  return `
     <!DOCTYPE html>
     <html>
     <head>
@@ -348,7 +355,7 @@ async function buildManualInvoiceHTML(invoice) {
             <div class="meta-row">
               <div class="contact">
                 <div>${invoice.clientMobile}</div>
-                <div>${invoice.clientAddress || ''}</div>
+                <div>${invoice.clientAddress || ""}</div>
               </div>
               <div>
                 <div class="field-label">Invoice No:</div>
@@ -369,16 +376,30 @@ async function buildManualInvoiceHTML(invoice) {
                   <th class="right">AMOUNT</th>
                 </tr>
               </thead>
-              <tbody>
-                ${invoice.items.map(item => `
-                  <tr>
-                    <td class="item-name">${item.description}</td>
-                    <td class="center">${fmt(item.price)}</td>
-                    <td class="center">${item.quantity}</td>
-                    <td class="right">${fmt(item.total)}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
+          <tbody>
+  ${(Array.isArray(invoice.items) && invoice.items.length
+    ? invoice.items
+    : [
+        {
+          description: invoice.installmentTitle || "Project Installment",
+          price: Number(invoice.totalAmount || 0),
+          quantity: 1,
+          total: Number(invoice.totalAmount || 0),
+        },
+      ]
+  )
+    .map(
+      (item) => `
+    <tr>
+      <td class="item-name">${item.description || "Project Installment"}</td>
+      <td class="center">${fmt(item.price)}</td>
+      <td class="center">${item.quantity ?? 1}</td>
+      <td class="right">${fmt(item.total ?? item.price)}</td>
+    </tr>
+  `,
+    )
+    .join("")}
+</tbody>
             </table>
 
             <div class="totals">
@@ -433,66 +454,66 @@ async function buildManualInvoiceHTML(invoice) {
 
 // ============ GENERATE MANUAL INVOICE PDF ============
 const generateManualInvoicePDF = async (invoice) => {
-    const html = await buildManualInvoiceHTML(invoice);
+  const html = await buildManualInvoiceHTML(invoice);
 
-    // Try to find Chrome on system
-    const chromePaths = [
-        '/usr/bin/google-chrome',
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium'
-    ];
+  // Try to find Chrome on system
+  const chromePaths = [
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+  ];
 
-    let executablePath = null;
-    for (const path of chromePaths) {
-        if (fs.existsSync(path)) {
-            executablePath = path;
-            console.log(`✅ Found Chrome at: ${executablePath}`);
-            break;
-        }
+  let executablePath = null;
+  for (const path of chromePaths) {
+    if (fs.existsSync(path)) {
+      executablePath = path;
+      console.log(`✅ Found Chrome at: ${executablePath}`);
+      break;
     }
+  }
 
-    // Launch with system Chrome if found, otherwise let puppeteer try
-    const launchOptions = {
-        headless: 'new',
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--disable-gpu',
-            '--disable-software-rasterizer'
-        ]
-    };
+  // Launch with system Chrome if found, otherwise let puppeteer try
+  const launchOptions = {
+    headless: "new",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-accelerated-2d-canvas",
+      "--disable-gpu",
+      "--disable-software-rasterizer",
+    ],
+  };
 
-    // Add executablePath only if Chrome was found
-    if (executablePath) {
-        launchOptions.executablePath = executablePath;
-        console.log('🚀 Using system Chrome');
-    } else {
-        console.warn('⚠️ System Chrome not found, using Puppeteer default');
-    }
+  // Add executablePath only if Chrome was found
+  if (executablePath) {
+    launchOptions.executablePath = executablePath;
+    console.log("🚀 Using system Chrome");
+  } else {
+    console.warn("⚠️ System Chrome not found, using Puppeteer default");
+  }
 
-    const browser = await puppeteer.launch(launchOptions);
+  const browser = await puppeteer.launch(launchOptions);
 
-    try {
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle0" });
 
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            margin: { top: 0, bottom: 0, left: 0, right: 0 }
-        });
+    const pdfBuffer = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: 0, bottom: 0, left: 0, right: 0 },
+    });
 
-        return pdfBuffer;
-    } finally {
-        await browser.close();
-    }
+    return pdfBuffer;
+  } finally {
+    await browser.close();
+  }
 };
 
 // ============ EXPORTS ============
 module.exports = {
-    generateManualInvoicePDF,
-    buildManualInvoiceHTML
+  generateManualInvoicePDF,
+  buildManualInvoiceHTML,
 };

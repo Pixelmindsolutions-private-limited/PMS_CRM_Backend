@@ -334,9 +334,10 @@ const createStaff = async (req, res) => {
       password,
       address,
       emergencyContact,
+      monthlySalary, // Added monthly salary
     } = req.body;
 
-    // Validation checks
+    // 1. Validate required fields
     if (!employeeId) {
       return res.status(400).json({
         success: false,
@@ -352,10 +353,9 @@ const createStaff = async (req, res) => {
       });
     }
 
-    // Normalize gender casing to match enum ['Male', 'Female']
-    const normalizedGender = gender
-      ? gender.charAt(0).toUpperCase() + gender.slice(1).toLowerCase()
-      : "Male";
+    // 2. Normalize and validate gender
+    const normalizedGender =
+      gender.charAt(0).toUpperCase() + gender.slice(1).toLowerCase();
 
     if (!["Male", "Female"].includes(normalizedGender)) {
       return res.status(400).json({
@@ -364,8 +364,27 @@ const createStaff = async (req, res) => {
       });
     }
 
-    // Check for existing staff
+    // 3. Validate monthly salary
+    let parsedMonthlySalary = null;
+
+    if (
+      monthlySalary !== undefined &&
+      monthlySalary !== null &&
+      monthlySalary !== ""
+    ) {
+      parsedMonthlySalary = Number(monthlySalary);
+
+      if (!Number.isFinite(parsedMonthlySalary) || parsedMonthlySalary < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Monthly salary must be a valid non-negative number",
+        });
+      }
+    }
+
+    // 4. Check duplicate employee ID
     let existingStaff = await Staff.findOne({ employeeId });
+
     if (existingStaff) {
       return res.status(400).json({
         success: false,
@@ -373,7 +392,11 @@ const createStaff = async (req, res) => {
       });
     }
 
-    existingStaff = await Staff.findOne({ $or: [{ email }, { mobile }] });
+    // 5. Check duplicate email or mobile
+    existingStaff = await Staff.findOne({
+      $or: [{ email: email.toLowerCase() }, { mobile }],
+    });
+
     if (existingStaff) {
       return res.status(400).json({
         success: false,
@@ -381,29 +404,25 @@ const createStaff = async (req, res) => {
       });
     }
 
+    // 6. Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Handle profile image upload
+    // 7. Handle profile image upload
     let profileImageUrl = null;
-    if (req.files && req.files.profileImage && req.files.profileImage[0]) {
+
+    if (req.files?.profileImage?.[0]) {
       const profileFile = req.files.profileImage[0];
 
-      console.log("📸 Profile file details:", {
-        originalname: profileFile.originalname,
-        path: profileFile.path,
-        size: profileFile.size,
-      });
-
       if (!fs.existsSync(profileFile.path)) {
-        console.error(`❌ File not found: ${profileFile.path}`);
         return res.status(500).json({
           success: false,
-          message: "Uploaded file not found",
+          message: "Uploaded profile image not found",
         });
       }
 
       const profileUploadDir = path.join(__dirname, "../uploads/staff/profile");
+
       ensureDirectoryExists(profileUploadDir);
 
       const fileExtension = path.extname(profileFile.originalname);
@@ -412,12 +431,11 @@ const createStaff = async (req, res) => {
 
       try {
         fs.renameSync(profileFile.path, finalPath);
-        console.log(`✅ Profile image saved: ${finalPath}`);
-        console.log(`✅ File exists verification: ${fs.existsSync(finalPath)}`);
 
         profileImageUrl = `${BASE_URL}/uploads/staff/profile/${fileName}`;
       } catch (fileError) {
-        console.error(`❌ Failed to move profile image: ${fileError.message}`);
+        console.error("Profile image save error:", fileError);
+
         return res.status(500).json({
           success: false,
           message: "Failed to save profile image",
@@ -425,26 +443,21 @@ const createStaff = async (req, res) => {
       }
     }
 
-    // Handle ID card image upload
+    // 8. Handle ID card image upload
     let idCardImageUrl = null;
-    if (req.files && req.files.idCardImage && req.files.idCardImage[0]) {
+
+    if (req.files?.idCardImage?.[0]) {
       const idFile = req.files.idCardImage[0];
 
-      console.log("🪪 ID card file details:", {
-        originalname: idFile.originalname,
-        path: idFile.path,
-        size: idFile.size,
-      });
-
       if (!fs.existsSync(idFile.path)) {
-        console.error(`❌ Temp ID file not found: ${idFile.path}`);
         return res.status(500).json({
           success: false,
-          message: "Temporary ID file not found",
+          message: "Temporary ID card file not found",
         });
       }
 
       const idUploadDir = path.join(__dirname, "../uploads/staff/idcards");
+
       ensureDirectoryExists(idUploadDir);
 
       const fileExtension = path.extname(idFile.originalname);
@@ -452,14 +465,12 @@ const createStaff = async (req, res) => {
       const finalPath = path.join(idUploadDir, fileName);
 
       try {
-        const fileData = fs.readFileSync(idFile.path);
-        fs.writeFileSync(finalPath, fileData);
-        fs.unlinkSync(idFile.path);
+        fs.renameSync(idFile.path, finalPath);
 
-        console.log(`✅ ID card saved: ${finalPath}`);
         idCardImageUrl = `${BASE_URL}/uploads/staff/idcards/${fileName}`;
       } catch (fileError) {
-        console.error(`❌ Failed to save ID card: ${fileError.message}`);
+        console.error("ID card save error:", fileError);
+
         return res.status(500).json({
           success: false,
           message: "Failed to save ID card image",
@@ -467,37 +478,47 @@ const createStaff = async (req, res) => {
       }
     }
 
-    // Parse address and emergency contact
+    // 9. Parse address
     let addressObj = {};
+
     if (address) {
       try {
         addressObj =
           typeof address === "string" ? JSON.parse(address) : address;
-      } catch (e) {
-        console.error("Address parse error:", e);
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid address format. Please provide valid JSON.",
+        });
       }
     }
 
+    // 10. Parse emergency contact
     let emergencyObj = {};
+
     if (emergencyContact) {
       try {
         emergencyObj =
           typeof emergencyContact === "string"
             ? JSON.parse(emergencyContact)
             : emergencyContact;
-      } catch (e) {
-        console.error("Emergency contact parse error:", e);
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid emergency contact format. Please provide valid JSON.",
+        });
       }
     }
 
-    // Create staff record — ✅ gender added here
+    // 11. Create staff record
     const staff = new Staff({
       employeeId,
       employeeName,
       role,
-      gender: normalizedGender, // 👈 ADDED
+      gender: normalizedGender,
       mobile,
-      email,
+      email: email.toLowerCase(),
       joiningDate: joiningDate || Date.now(),
       bloodGroup: bloodGroup || "Unknown",
       password: hashedPassword,
@@ -505,41 +526,46 @@ const createStaff = async (req, res) => {
       idCardImage: idCardImageUrl,
       address: addressObj,
       emergencyContact: emergencyObj,
+
+      // Monthly salary saved in MongoDB
+      monthlySalary: parsedMonthlySalary,
     });
 
     await staff.save();
 
-    // Handle document uploads
-    if (req.files && req.files.documents && req.files.documents.length > 0) {
+    // 12. Handle document uploads
+    if (req.files?.documents?.length > 0) {
       const documents = req.files.documents;
       const batchId = generateBatchId(employeeId);
+
       const docDir = path.join(
         __dirname,
         "../uploads/staff/documents",
         employeeId,
       );
+
       ensureDirectoryExists(docDir);
 
       for (let i = 0; i < documents.length; i++) {
         const file = documents[i];
 
         if (!fs.existsSync(file.path)) {
-          console.error(`❌ Temp document file not found: ${file.path}`);
+          console.error(`Document file not found: ${file.path}`);
           continue;
         }
 
         const fileExtension = path.extname(file.originalname);
         const fileType = getFileType(file.originalname);
+
         const documentName = file.originalname
           .replace(fileExtension, "")
           .replace(/[_-]/g, " ");
+
         const fileName = `${Date.now()}_${file.originalname.replace(/\s/g, "_")}`;
         const finalPath = path.join(docDir, fileName);
 
         try {
-          const fileData = fs.readFileSync(file.path);
-          fs.writeFileSync(finalPath, fileData);
-          fs.unlinkSync(file.path);
+          fs.renameSync(file.path, finalPath);
 
           const docTypeKey = `documentType_${i}`;
           const docType = req.body[docTypeKey] || "General";
@@ -547,26 +573,30 @@ const createStaff = async (req, res) => {
           await StaffDocument.create({
             employeeId: staff.employeeId,
             employeeName: staff.employeeName,
-            documentName: documentName,
+            documentName,
             fileName: file.originalname,
             filePath: `${BASE_URL}/uploads/staff/documents/${employeeId}/${fileName}`,
-            fileType: fileType,
+            fileType,
             fileSize: file.size,
             mimeType: file.mimetype,
             description: `Document type: ${docType}`,
-            batchId: batchId,
+            batchId,
             uploadedAt: new Date(),
           });
         } catch (fileError) {
-          console.error(`❌ Failed to save document: ${fileError.message}`);
+          console.error(
+            `Failed to save document ${file.originalname}:`,
+            fileError,
+          );
         }
       }
     }
 
+    // 13. Return response without password
     const staffResponse = staff.toObject();
     delete staffResponse.password;
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Staff created successfully",
       data: staffResponse,
@@ -574,32 +604,43 @@ const createStaff = async (req, res) => {
   } catch (error) {
     console.error("Create staff error:", error);
 
-    // Clean up any uploaded files if there's an error
+    // Clean up remaining temporary uploaded files
     if (req.files) {
       Object.values(req.files)
         .flat()
         .forEach((file) => {
-          if (fs.existsSync(file.path)) {
-            fs.unlinkSync(file.path);
+          try {
+            if (file.path && fs.existsSync(file.path)) {
+              fs.unlinkSync(file.path);
+            }
+          } catch (cleanupError) {
+            console.error("Temporary file cleanup error:", cleanupError);
           }
         });
     }
 
     if (error.code === 11000) {
-      const field = Object.keys(error.keyPattern)[0];
+      const field = Object.keys(error.keyPattern || {})[0] || "Field";
+
       return res.status(400).json({
         success: false,
         message: `${field} already exists. Please use a different value.`,
       });
     }
 
-    res.status(500).json({
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
       success: false,
       message: error.message || "Server error while creating staff",
     });
   }
 };
-
 const getAllStaff = async (req, res) => {
   try {
     const { page = 1, limit = 10, search, role, status, gender } = req.query;
@@ -2063,15 +2104,16 @@ const getStaffByEmployeeId = async (req, res) => {
       });
     }
 
-    res.json({
+    return res.status(200).json({
       success: true,
       data: staff,
     });
   } catch (error) {
     console.error("Get staff error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message: error.message || "Server error while fetching staff",
     });
   }
 };
@@ -2082,6 +2124,7 @@ const updateStaff = async (req, res) => {
     const updateData = { ...req.body };
 
     const staff = await Staff.findOne({ employeeId });
+
     if (!staff) {
       return res.status(404).json({
         success: false,
@@ -2089,6 +2132,27 @@ const updateStaff = async (req, res) => {
       });
     }
 
+    // 1. Validate and convert monthly salary
+    if (Object.prototype.hasOwnProperty.call(updateData, "monthlySalary")) {
+      const salary = updateData.monthlySalary;
+
+      if (salary === "" || salary === null) {
+        updateData.monthlySalary = null;
+      } else {
+        const parsedSalary = Number(salary);
+
+        if (!Number.isFinite(parsedSalary) || parsedSalary < 0) {
+          return res.status(400).json({
+            success: false,
+            message: "Monthly salary must be a valid non-negative number",
+          });
+        }
+
+        updateData.monthlySalary = parsedSalary;
+      }
+    }
+
+    // 2. Hash password only when a new password is provided
     if (updateData.password && updateData.password.trim()) {
       const salt = await bcrypt.genSalt(10);
       updateData.password = await bcrypt.hash(updateData.password, salt);
@@ -2096,67 +2160,98 @@ const updateStaff = async (req, res) => {
       delete updateData.password;
     }
 
-    if (req.files && req.files.profileImage && req.files.profileImage[0]) {
+    // 3. Handle profile image upload
+    if (req.files?.profileImage?.[0]) {
       const profileFile = req.files.profileImage[0];
       const uploadDir = path.join(__dirname, "../uploads/staff/profile");
-      ensureDirectoryExists(uploadDir);
 
-      if (staff.profileImage) {
-        const oldImagePath = staff.profileImage.replace(
-          BASE_URL,
-          path.join(__dirname, ".."),
-        );
-        if (fs.existsSync(oldImagePath)) {
-          fs.unlinkSync(oldImagePath);
-        }
-      }
+      ensureDirectoryExists(uploadDir);
 
       const fileName = `${employeeId}_profile_${Date.now()}${path.extname(profileFile.originalname)}`;
       const finalPath = path.join(uploadDir, fileName);
 
       fs.renameSync(profileFile.path, finalPath);
-      updateData.profileImage = `${BASE_URL}/uploads/staff/profile/${fileName}`;
-    }
 
-    if (req.files && req.files.idCardImage && req.files.idCardImage[0]) {
-      const idFile = req.files.idCardImage[0];
-      const uploadDir = path.join(__dirname, "../uploads/staff/idcards");
-      ensureDirectoryExists(uploadDir);
-
-      if (staff.idCardImage) {
-        const oldImagePath = staff.idCardImage.replace(
+      // Delete old image after the new image is saved
+      if (staff.profileImage) {
+        const oldImagePath = staff.profileImage.replace(
           BASE_URL,
           path.join(__dirname, ".."),
         );
+
         if (fs.existsSync(oldImagePath)) {
           fs.unlinkSync(oldImagePath);
         }
       }
 
+      updateData.profileImage = `${BASE_URL}/uploads/staff/profile/${fileName}`;
+    }
+
+    // 4. Handle ID card image upload
+    if (req.files?.idCardImage?.[0]) {
+      const idFile = req.files.idCardImage[0];
+      const uploadDir = path.join(__dirname, "../uploads/staff/idcards");
+
+      ensureDirectoryExists(uploadDir);
+
       const fileName = `${employeeId}_idcard_${Date.now()}${path.extname(idFile.originalname)}`;
       const finalPath = path.join(uploadDir, fileName);
 
       fs.renameSync(idFile.path, finalPath);
+
+      // Delete old ID card after the new file is saved
+      if (staff.idCardImage) {
+        const oldImagePath = staff.idCardImage.replace(
+          BASE_URL,
+          path.join(__dirname, ".."),
+        );
+
+        if (fs.existsSync(oldImagePath)) {
+          fs.unlinkSync(oldImagePath);
+        }
+      }
+
       updateData.idCardImage = `${BASE_URL}/uploads/staff/idcards/${fileName}`;
     }
 
+    // 5. Parse address
     if (updateData.address && typeof updateData.address === "string") {
-      updateData.address = JSON.parse(updateData.address);
+      try {
+        updateData.address = JSON.parse(updateData.address);
+      } catch {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid address JSON format",
+        });
+      }
     }
+
+    // 6. Parse emergency contact
     if (
       updateData.emergencyContact &&
       typeof updateData.emergencyContact === "string"
     ) {
-      updateData.emergencyContact = JSON.parse(updateData.emergencyContact);
+      try {
+        updateData.emergencyContact = JSON.parse(updateData.emergencyContact);
+      } catch {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid emergency contact JSON format",
+        });
+      }
     }
 
+    // 7. Update staff record
     const updatedStaff = await Staff.findOneAndUpdate(
       { employeeId },
       updateData,
-      { new: true, runValidators: true },
+      {
+        new: true,
+        runValidators: true,
+      },
     ).select("-password");
 
-    res.json({
+    return res.status(200).json({
       success: true,
       message: "Staff updated successfully",
       data: updatedStaff,
@@ -2165,16 +2260,24 @@ const updateStaff = async (req, res) => {
     console.error("Update staff error:", error);
 
     if (error.code === 11000) {
-      const field = Object.keys(error.keyPattern)[0];
+      const field = Object.keys(error.keyPattern || {})[0] || "Field";
+
       return res.status(400).json({
         success: false,
         message: `${field} already exists.`,
       });
     }
 
-    res.status(500).json({
+    if (error.name === "ValidationError" || error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message: error.message || "Server error while updating staff",
     });
   }
 };
@@ -2895,7 +2998,51 @@ const getEmployeeSessionTracking = async (req, res) => {
 
 const IST = "Asia/Kolkata";
 const REQUIRED_HOURS_PER_DAY = 8;
+const OFFICE_START_HOUR = 10;
+const OFFICE_END_HOUR = 19.5; // 7:30 PM
 
+function calculateDailySalary(monthlySalary, scheduledDays, workingMinutes) {
+  // Validate monthly salary
+  if (
+    monthlySalary === null ||
+    monthlySalary === undefined ||
+    !Number.isFinite(Number(monthlySalary)) ||
+    Number(monthlySalary) < 0
+  ) {
+    return {
+      dailyRate: 0,
+      payable: 0,
+      deduction: 0,
+      workingHours: 0,
+    };
+  }
+
+  // Fixed 30-day salary calculation
+  const salary = Number(monthlySalary);
+  const dailyRate = salary / 30;
+
+  // Work duration is stored in minutes
+  const minutes = Math.max(0, Number(workingMinutes) || 0);
+  const workingHours = minutes / 60;
+
+  // Maximum payable working hours per day = 8
+  const requiredHours = REQUIRED_HOURS_PER_DAY;
+  const payableHours = Math.min(workingHours, requiredHours);
+
+  // Calculate payable salary according to actual working hours
+  const payable =
+    requiredHours > 0 ? dailyRate * (payableHours / requiredHours) : 0;
+
+  // Deduction cannot be negative
+  const deduction = Math.max(0, dailyRate - payable);
+
+  return {
+    dailyRate: round2(dailyRate),
+    payable: round2(payable),
+    deduction: round2(deduction),
+    workingHours: round2(workingHours),
+  };
+}
 function parseDate(dateString) {
   if (!dateString || !/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
     return null;
@@ -2982,7 +3129,48 @@ function getSalaryValue(staff) {
 }
 
 function round2(value) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function getScheduledDaysInMonth(monthKey) {
+  const [year, month] = monthKey.split("-").map(Number);
+
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+  const firstDay = `${monthKey}-01`;
+  const lastDay = `${monthKey}-${String(daysInMonth).padStart(2, "0")}`;
+
+  return getScheduledDays(firstDay, lastDay).length;
+}
+
+function calculateDailySalary(monthlySalary, scheduledDays, workingMinutes) {
+  if (
+    monthlySalary == null ||
+    !Number.isFinite(Number(monthlySalary)) ||
+    Number(monthlySalary) < 0 ||
+    scheduledDays <= 0
+  ) {
+    return {
+      dailyRate: 0,
+      payable: 0,
+      deduction: 0,
+      workingHours: 0,
+    };
+  }
+
+  const dailyRate = Number(monthlySalary) / scheduledDays;
+  const workingHours = Math.max(0, Number(workingMinutes) || 0) / 60;
+
+  const payableHours = Math.min(workingHours, REQUIRED_HOURS_PER_DAY);
+
+  const payable = dailyRate * (payableHours / REQUIRED_HOURS_PER_DAY);
+
+  return {
+    dailyRate: round2(dailyRate),
+    payable: round2(payable),
+    deduction: round2(Math.max(0, dailyRate - payable)),
+    workingHours: round2(workingHours),
+  };
 }
 
 function getTotalHours(session, now) {
@@ -3071,100 +3259,195 @@ const getWorkSalaryReport = async (req, res) => {
       const id = staff.employeeId;
       const dayMap = sessionsByEmployee.get(id) || new Map();
 
+      const monthlySalary = getSalaryValue(staff);
+
       let totalWorkingDays = 0;
       let totalWorkingMinutes = 0;
       let totalElapsedHours = 0;
 
-      for (const day of scheduledDays) {
-        const daySessions = dayMap.get(day) || [];
+      let totalPayableSalary = 0;
+      let totalSalaryDeduction = 0;
+      let totalAbsentDays = 0;
+      let totalPartialDays = 0;
 
-        const attended = daySessions.some((session) =>
-          Boolean(session.startTime),
+      const months = [...new Set(scheduledDays.map((day) => day.slice(0, 7)))];
+
+      for (const monthKey of months) {
+        const [year, month] = monthKey.split("-").map(Number);
+        const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+        const monthStart = `${monthKey}-01`;
+        const monthEnd = `${monthKey}-${String(daysInMonth).padStart(2, "0")}`;
+
+        const scheduledDaysInMonth = getScheduledDays(
+          monthStart,
+          monthEnd,
+        ).length;
+
+        if (!scheduledDaysInMonth) continue;
+
+        // Calculate only dates in the selected range that have passed.
+        const payableDays = scheduledDays.filter(
+          (day) => day.startsWith(monthKey) && day <= today,
         );
 
-        if (attended) {
-          totalWorkingDays++;
-        }
+        for (const day of payableDays) {
+          const daySessions = dayMap.get(day) || [];
 
-        for (const session of daySessions) {
-          if (session.startTime) {
-            totalElapsedHours += getTotalHours(session, now);
-          }
+          const validSessions = daySessions.filter((session) => {
+            if (!session.startTime) return false;
 
-          totalWorkingMinutes += Math.max(
-            0,
-            Number(session.totalWorkDuration) || 0,
-          );
-        }
-      }
+            const sessionStart = new Date(session.startTime);
 
-      const monthlySalary = getSalaryValue(staff);
-
-      let periodSalary = null;
-      let payableSalary = null;
-
-      if (monthlySalary !== null) {
-        const months = new Set(scheduledDays.map((day) => day.slice(0, 7)));
-
-        let salaryForPeriod = 0;
-        let absenceDeduction = 0;
-
-        for (const monthKey of months) {
-          const [year, month] = monthKey.split("-").map(Number);
-          const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-
-          const monthStart = `${monthKey}-01`;
-          const monthEnd = `${monthKey}-${String(daysInMonth).padStart(2, "0")}`;
-
-          const scheduledDaysInMonth = getScheduledDays(
-            monthStart,
-            monthEnd,
-          ).length;
-
-          const scheduledDaysInPeriod = scheduledDays.filter(
-            (day) => day.startsWith(monthKey) && day <= today,
-          ).length;
-
-          if (!scheduledDaysInMonth) continue;
-
-          const dailyRate = monthlySalary / scheduledDaysInMonth;
-
-          salaryForPeriod += dailyRate * scheduledDaysInPeriod;
-
-          const absentInMonth = scheduledDays.filter((day) => {
-            if (!day.startsWith(monthKey) || day >= today) {
+            if (Number.isNaN(sessionStart.getTime())) {
               return false;
             }
 
-            const attended = (dayMap.get(day) || []).some((session) =>
-              Boolean(session.startTime),
+            // Today's active session can count even before checkout.
+            if (!session.endTime) {
+              if (dateKey(session.date) === today) {
+                return true;
+              }
+
+              // Historical session counts only if work duration was recorded.
+              return Number(session.totalWorkDuration) > 0;
+            }
+
+            const sessionEnd = new Date(session.endTime);
+
+            return (
+              !Number.isNaN(sessionEnd.getTime()) && sessionEnd >= sessionStart
+            );
+          });
+
+          const workingMinutes = validSessions.reduce(
+            (sum, session) =>
+              sum + Math.max(0, Number(session.totalWorkDuration) || 0),
+            0,
+          );
+
+          const attended = validSessions.length > 0;
+
+          if (attended) totalWorkingDays++;
+          else totalAbsentDays++;
+
+          if (
+            workingMinutes > 0 &&
+            workingMinutes < REQUIRED_HOURS_PER_DAY * 60
+          ) {
+            totalPartialDays++;
+          }
+
+          totalWorkingMinutes += workingMinutes;
+
+          const elapsedIntervals = [];
+
+          for (const session of daySessions) {
+            const sessionStart = session.startTime
+              ? new Date(session.startTime)
+              : null;
+            const sessionEnd = session.endTime
+              ? new Date(session.endTime)
+              : null;
+            const sessionDay = dateKey(session.date);
+
+            console.log("Work salary report session elapsed input:", {
+              employeeId: session.employeeId,
+              attendanceDate: session.date,
+              attendanceDateIST: sessionDay,
+              startTime: session.startTime,
+              endTime: session.endTime,
+              totalWorkDuration: session.totalWorkDuration,
+              status: session.status,
+            });
+
+            if (!sessionStart || Number.isNaN(sessionStart.getTime())) continue;
+
+            let elapsedEnd = sessionEnd;
+            if (!elapsedEnd) {
+              // Only today's unfinished session may run up to the current time.
+              if (
+                sessionDay !== today ||
+                !["working", "idle", "on_break"].includes(session.status) ||
+                now <= sessionStart
+              ) {
+                continue;
+              }
+              elapsedEnd = now;
+            }
+
+            if (
+              Number.isNaN(elapsedEnd.getTime()) ||
+              elapsedEnd <= sessionStart
+            ) {
+              continue;
+            }
+
+            elapsedIntervals.push({
+              start: sessionStart.getTime(),
+              end: elapsedEnd.getTime(),
+            });
+          }
+
+          // Merge overlapping intervals so they are counted only once.
+          elapsedIntervals.sort((a, b) => a.start - b.start);
+          let mergedStart = null;
+          let mergedEnd = null;
+
+          for (const interval of elapsedIntervals) {
+            if (mergedStart === null) {
+              mergedStart = interval.start;
+              mergedEnd = interval.end;
+            } else if (interval.start <= mergedEnd) {
+              mergedEnd = Math.max(mergedEnd, interval.end);
+            } else {
+              totalElapsedHours += (mergedEnd - mergedStart) / 3600000;
+              mergedStart = interval.start;
+              mergedEnd = interval.end;
+            }
+          }
+
+          if (mergedStart !== null) {
+            totalElapsedHours += (mergedEnd - mergedStart) / 3600000;
+          }
+          if (monthlySalary !== null) {
+            const daily = calculateDailySalary(
+              monthlySalary,
+              scheduledDaysInMonth,
+              workingMinutes,
             );
 
-            return !attended;
-          }).length;
-
-          absenceDeduction += dailyRate * absentInMonth;
+            totalPayableSalary += daily.payable;
+            totalSalaryDeduction += daily.deduction;
+          }
         }
-
-        periodSalary = round2(salaryForPeriod);
-        payableSalary = round2(Math.max(0, salaryForPeriod - absenceDeduction));
       }
 
       return {
         employeeId: id,
         employeeName:
-          staff.employeeName ||
-          staff.name ||
-          staff.fullName ||
-          sessions.find((s) => s.employeeId === id)?.employeeName ||
-          "Unknown",
+          staff.employeeName || staff.name || staff.fullName || "Unknown",
+
+        monthlySalary,
 
         totalWorkingDays,
         totalScheduledWorkingDays: scheduledDaySet.size,
-        totalHours: round2(totalElapsedHours),
         totalWorkingHours: round2(totalWorkingMinutes / 60),
+        totalHours: round2(totalElapsedHours),
+
+        // Existing field now means actual payable salary for the period.
         totalSalary: monthlySalary,
-        periodSalary,
+        periodSalary:
+          monthlySalary === null ? null : round2(totalPayableSalary),
+
+        payableSalary:
+          monthlySalary === null ? null : round2(totalPayableSalary),
+
+        salaryDeduction:
+          monthlySalary === null ? null : round2(totalSalaryDeduction),
+
+        totalAbsentDays,
+        totalPartialDays,
       };
     });
 
@@ -3182,6 +3465,306 @@ const getWorkSalaryReport = async (req, res) => {
       success: false,
       message: "Failed to fetch employee work and salary report.",
       error: error.message,
+    });
+  }
+};
+
+const getEmployeeDailyWorkDetails = async (req, res) => {
+  try {
+    const { employeeId, startDate, endDate } = req.query;
+
+    if (!employeeId || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "employeeId, startDate and endDate are required.",
+      });
+    }
+
+    const start = parseDate(startDate);
+    const end = parseDate(endDate);
+
+    if (!start || !end || start > end) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid date range.",
+      });
+    }
+
+    // 1. Fetch employee
+    const staff = await Staff.findOne({ employeeId })
+      .select("-password")
+      .lean();
+
+    if (!staff) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found.",
+      });
+    }
+
+    const monthlySalary = getSalaryValue(staff);
+    const now = new Date();
+    const today = dateKey(now);
+    const REQUIRED_HOURS = 8;
+
+    // 2. Fetch work sessions
+    const sessions = await WorkSession.find({
+      employeeId,
+      date: {
+        $gte: start,
+        $lt: getNextDay(end),
+      },
+    })
+      .select(
+        "employeeId employeeName date startTime endTime totalWorkDuration status",
+      )
+      .sort({ date: 1, startTime: 1 })
+      .lean();
+
+    // 3. Group sessions by IST date
+    const sessionsByDate = new Map();
+
+    for (const session of sessions) {
+      const day = dateKey(session.date);
+
+      if (!sessionsByDate.has(day)) {
+        sessionsByDate.set(day, []);
+      }
+
+      sessionsByDate.get(day).push(session);
+    }
+
+    // 4. Scheduled working dates, excluding existing holidays
+    const scheduledDays = getScheduledDays(startDate, endDate);
+
+    // 5. Generate daily attendance and salary details
+    const dailyRecords = scheduledDays.map((day) => {
+      const daySessions = sessionsByDate.get(day) || [];
+      const validSessions = daySessions.filter((session) => {
+        if (!session.startTime) return false;
+
+        const sessionStart = new Date(session.startTime);
+
+        if (Number.isNaN(sessionStart.getTime())) return false;
+
+        // Historical session with no endTime:
+        // keep it if recorded working duration exists.
+        if (!session.endTime) {
+          if (day === today) return true;
+
+          return Number(session.totalWorkDuration) > 0;
+        }
+
+        const sessionEnd = new Date(session.endTime);
+
+        return (
+          !Number.isNaN(sessionEnd.getTime()) && sessionEnd >= sessionStart
+        );
+      });
+      // totalWorkDuration is assumed to be stored in minutes
+      const totalMinutes = validSessions.reduce(
+        (sum, session) =>
+          sum + Math.max(0, Number(session.totalWorkDuration) || 0),
+        0,
+      );
+
+      const totalElapsedMinutes = validSessions.reduce((sum, session) => {
+        const sessionStart = new Date(session.startTime);
+
+        // Completed session: use its actual end time.
+        if (session.endTime) {
+          const sessionEnd = new Date(session.endTime);
+
+          return sum + Math.max(0, (sessionEnd - sessionStart) / 60000);
+        }
+
+        // Only today's active session can use the current time.
+        if (day === today) {
+          return sum + Math.max(0, (now - sessionStart) / 60000);
+        }
+
+        // Historical session has no endTime.
+        // Its elapsed duration cannot be reliably reconstructed.
+        return sum;
+      }, 0);
+
+      const formatTime = (value) => {
+        if (!value) return null;
+
+        return new Intl.DateTimeFormat("en-IN", {
+          timeZone: "Asia/Kolkata",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        }).format(new Date(value));
+      };
+
+      const workingHours = round2(totalMinutes / 60);
+      const isFutureDate = day > today;
+      const isToday = day === today;
+
+      // Salary is calculated only for dates that have ended.
+      // Today's salary is provisional and future dates are excluded.
+      // Check whether any session for this date is unfinished.
+      const hasUnfinishedSession = daySessions.some(
+        (session) => session.startTime && !session.endTime,
+      );
+
+      // Do not finalize salary if a session is unfinished.
+      const isSalaryFinal = !isToday && !isFutureDate && !hasUnfinishedSession;
+      const scheduledDaysInMonth = getScheduledDaysInMonth(day.slice(0, 7));
+
+      const dailySalaryDetails =
+        monthlySalary !== null && isSalaryFinal
+          ? calculateDailySalary(
+              monthlySalary,
+              scheduledDaysInMonth,
+              totalMinutes,
+            )
+          : null;
+
+      let attendanceStatus;
+
+      if (isFutureDate) {
+        attendanceStatus = "Upcoming";
+      } else if (isToday) {
+        attendanceStatus = validSessions.length
+          ? workingHours >= REQUIRED_HOURS
+            ? "Full Day"
+            : "In Progress"
+          : "Pending";
+      } else if (!validSessions.length || totalMinutes <= 0) {
+        attendanceStatus = "Absent";
+      } else if (workingHours >= REQUIRED_HOURS) {
+        attendanceStatus = "Full Day";
+      } else {
+        attendanceStatus = "Partial Day";
+      }
+
+      return {
+        // Existing fields preserved
+        date: day,
+        status:
+          validSessions.length > 0 && totalMinutes > 0 ? "Present" : "Absent",
+        sessionCount: validSessions.length,
+
+        checkIn: validSessions.length
+          ? formatTime(validSessions[0].startTime)
+          : null,
+
+        checkOut: validSessions.length
+          ? formatTime(validSessions[validSessions.length - 1].endTime)
+          : null,
+
+        totalWorkingHours: workingHours,
+
+        totalElapsedHours: round2(totalElapsedMinutes / 60),
+
+        sessions: validSessions.map((session) => ({
+          startTime: formatTime(session.startTime),
+          endTime: formatTime(session.endTime),
+
+          workingHours: round2(
+            Math.max(0, Number(session.totalWorkDuration) || 0) / 60,
+          ),
+
+          status: session.status,
+        })),
+
+        // New attendance and salary fields
+        requiredHours: REQUIRED_HOURS,
+        attendanceStatus,
+
+        shortfallHours: round2(Math.max(0, REQUIRED_HOURS - workingHours)),
+
+        dailySalary: dailySalaryDetails?.payable ?? null,
+
+        salaryDeduction: dailySalaryDetails?.deduction ?? null,
+
+        dailyRate: dailySalaryDetails?.dailyRate ?? null,
+
+        salaryFinalized: isSalaryFinal,
+      };
+    });
+
+    // 6. Summary
+    const completedRecords = dailyRecords.filter((day) => day.date < today);
+
+    const totalWorkingHours = round2(
+      dailyRecords.reduce((sum, day) => sum + day.totalWorkingHours, 0),
+    );
+
+    const finalizedSalaryRecords = dailyRecords.filter(
+      (day) => day.salaryFinalized,
+    );
+
+    const totalSalaryPayable =
+      monthlySalary === null
+        ? null
+        : round2(
+            finalizedSalaryRecords.reduce(
+              (sum, day) => sum + (day.dailySalary || 0),
+              0,
+            ),
+          );
+
+    const totalSalaryDeduction =
+      monthlySalary === null
+        ? null
+        : round2(
+            finalizedSalaryRecords.reduce(
+              (sum, day) => sum + (day.salaryDeduction || 0),
+              0,
+            ),
+          );
+
+    return res.status(200).json({
+      success: true,
+
+      employee: {
+        employeeId: staff.employeeId,
+        employeeName:
+          staff.employeeName || staff.name || staff.fullName || "Unknown",
+        monthlySalary,
+      },
+
+      dateRange: { startDate, endDate },
+
+      summary: {
+        workingDays: completedRecords.filter((day) => day.totalWorkingHours > 0)
+          .length,
+
+        totalScheduledDays: scheduledDays.length,
+
+        totalWorkingHours,
+
+        // New summary fields
+        completedDays: completedRecords.length,
+
+        fullDays: completedRecords.filter(
+          (day) => day.attendanceStatus === "Full Day",
+        ).length,
+
+        partialDays: completedRecords.filter(
+          (day) => day.attendanceStatus === "Partial Day",
+        ).length,
+
+        absentDays: completedRecords.filter(
+          (day) => day.attendanceStatus === "Absent",
+        ).length,
+
+        totalSalaryPayable,
+        totalSalaryDeduction,
+      },
+
+      data: dailyRecords,
+    });
+  } catch (error) {
+    console.error("Employee daily work details error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch daily work details.",
     });
   }
 };
@@ -3220,4 +3803,5 @@ module.exports = {
   getBreakSummary,
   getEmployeeSessionTracking,
   getWorkSalaryReport,
+  getEmployeeDailyWorkDetails,
 };

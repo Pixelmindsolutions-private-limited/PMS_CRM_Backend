@@ -1519,87 +1519,131 @@ const workTimeResponse = (minutes) => {
 
 // @desc    Start work session
 // Helper function to reconcile inactive periods (e.g. laptop shut down, power off, or away)
+
 const reconcileSession = async (session, now = new Date()) => {
-  if (!session || session.status === "completed") return session;
+  if (!session || session.status === "completed") {
+    return session;
+  }
 
   const thresholdMs = (Number(WorkSchedule?.idleThresholdMinutes) || 2) * 60000;
+
   let changed = false;
 
-  // End an expired break once, at its expected end, then apply the normal
-  // inactivity grace period from that point.
+  // 1. Automatically end an expired scheduled break.
   if (session.status === "on_break" && session.currentBreak?.expectedEndTime) {
     const expectedEnd = new Date(session.currentBreak.expectedEndTime);
+
     if (expectedEnd <= now) {
-      const breakMins = Math.max(
+      const breakStart = new Date(session.currentBreak.startTime);
+
+      const breakMinutes = Math.max(
         0,
-        (expectedEnd.getTime() -
-          new Date(session.currentBreak.startTime).getTime()) /
-          60000,
+        (expectedEnd.getTime() - breakStart.getTime()) / 60000,
       );
+
       session.totalBreakDuration =
-        (session.totalBreakDuration || 0) + breakMins;
+        (Number(session.totalBreakDuration) || 0) + breakMinutes;
+
       session.currentBreak.status = "ended";
       session.currentBreak.endTime = expectedEnd;
-      session.currentBreak.duration = breakMins;
+      session.currentBreak.duration = breakMinutes;
 
-      const item = session.breaks?.find((b) => b.status === "active");
-      if (item) {
-        item.status = "ended";
-        item.endTime = expectedEnd;
-        item.duration = breakMins;
+      // Update the matching active break only.
+      const activeBreak = session.breaks?.find(
+        (item) =>
+          item.status === "active" &&
+          item.startTime &&
+          new Date(item.startTime).getTime() === breakStart.getTime(),
+      );
+
+      if (activeBreak) {
+        activeBreak.status = "ended";
+        activeBreak.endTime = expectedEnd;
+        activeBreak.duration = breakMinutes;
       }
 
+      session.activityLogs.push({
+        timestamp: expectedEnd,
+        type: "break_end",
+        details: "Break ended after scheduled duration",
+      });
+
+      session.currentBreak = null;
       session.status = "working";
       session.lastActiveTime = expectedEnd;
       session.idleStartTime = null;
       session.idlePopupShown = false;
-      session.currentBreak = null;
-      session.activityLogs.push({
-        timestamp: expectedEnd,
-        type: "break_end",
-        details: "Break ended after schedule expired",
-      });
+
       changed = true;
     }
   }
 
+  // 2. Start idle only once when the inactivity threshold is reached.
   if (session.status === "working") {
-    const last = new Date(session.lastActiveTime || session.startTime || now);
+    const lastActive = new Date(
+      session.lastActiveTime || session.startTime || now,
+    );
 
-    const inactiveMs = Math.max(0, now.getTime() - last.getTime());
+    const inactiveMs = Math.max(0, now.getTime() - lastActive.getTime());
 
     if (inactiveMs >= thresholdMs) {
-      // session idle mark hota hai
-    }
-    if (inactiveMs >= thresholdMs) {
-      const idleStart = new Date(last.getTime() + thresholdMs);
-      const startTime = new Date(session.startTime || idleStart);
+      const idleStart = new Date(lastActive.getTime() + thresholdMs);
+
+      // Prevent duplicate idle transitions if this period was
+      // already recorded in the activity logs.
+      const alreadyLogged = session.activityLogs?.some(
+        (log) =>
+          log.type === "idle_start" &&
+          new Date(log.timestamp).getTime() === idleStart.getTime(),
+      );
+
       session.status = "idle";
       session.idleStartTime = idleStart;
-      session.idlePopupShown = true;
+
+      if (!alreadyLogged) {
+        session.activityLogs.push({
+          timestamp: idleStart,
+          type: "idle_start",
+          details: "Inactivity threshold reached",
+        });
+      }
+
+      // Show one popup for this idle period.
+      if (!session.idlePopupShown) {
+        session.idlePopupShown = true;
+
+        const popupAlreadyLogged = session.activityLogs?.some(
+          (log) =>
+            log.type === "idle_popup_shown" &&
+            new Date(log.timestamp).getTime() === idleStart.getTime(),
+        );
+
+        if (!popupAlreadyLogged) {
+          session.activityLogs.push({
+            timestamp: idleStart,
+            type: "idle_popup_shown",
+            details: "Idle prompt shown",
+          });
+        }
+      }
+
+      // Store work duration up to the beginning of this idle period.
+      const startTime = new Date(session.startTime || idleStart);
+
       session.totalWorkDuration = Math.max(
         0,
         (idleStart.getTime() - startTime.getTime()) / 60000 -
           (Number(session.totalBreakDuration) || 0) -
           (Number(session.totalIdleTime) || 0),
       );
-      session.activityLogs.push(
-        {
-          timestamp: idleStart,
-          type: "idle_start",
-          details: "Inactivity threshold reached during power-off or absence",
-        },
-        {
-          timestamp: idleStart,
-          type: "idle_popup_shown",
-          details: "Idle prompt shown",
-        },
-      );
+
       changed = true;
     }
   }
 
-  if (changed) await session.save();
+  if (changed) {
+    await session.save();
+  }
 
   return session;
 };
@@ -2290,7 +2334,11 @@ const handleIdleResponse = async (req, res) => {
   }
 };
 
-const finalizeWorkSession = async (x, now = new Date(), details = "Work session ended") => {
+const finalizeWorkSession = async (
+  x,
+  now = new Date(),
+  details = "Work session ended",
+) => {
   await reconcileSession(x, now);
 
   // End an active break
@@ -2304,15 +2352,14 @@ const finalizeWorkSession = async (x, now = new Date(), details = "Work session 
     br.endTime = endAt;
     br.duration = Math.max(
       0,
-      (endAt.getTime() - new Date(br.startTime).getTime()) / 60000
+      (endAt.getTime() - new Date(br.startTime).getTime()) / 60000,
     );
     br.status = "ended";
 
     const item = x.breaks.find(
       (b) =>
         b.status === "active" &&
-        new Date(b.startTime).getTime() ===
-          new Date(br.startTime).getTime()
+        new Date(b.startTime).getTime() === new Date(br.startTime).getTime(),
     );
 
     if (item) {
@@ -2328,14 +2375,17 @@ const finalizeWorkSession = async (x, now = new Date(), details = "Work session 
   if (x.status === "idle" && x.idleStartTime) {
     x.totalIdleTime =
       (Number(x.totalIdleTime) || 0) +
-      Math.max(0, (now.getTime() - new Date(x.idleStartTime).getTime()) / 60000);
+      Math.max(
+        0,
+        (now.getTime() - new Date(x.idleStartTime).getTime()) / 60000,
+      );
   }
 
   x.totalWorkDuration = Math.max(
     0,
     (now.getTime() - new Date(x.startTime).getTime()) / 60000 -
       (Number(x.totalBreakDuration) || 0) -
-      (Number(x.totalIdleTime) || 0)
+      (Number(x.totalIdleTime) || 0),
   );
 
   x.status = "completed";

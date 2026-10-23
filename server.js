@@ -210,6 +210,7 @@ const workSessionRoutes = require("./routes/WorkSession.routes");
 const digitalMarketingRoutes = require("./routes/marketing.routes");
 const adminStaffLogin = require("./routes/adminStaff.routes");
 const manualInvoiceRoutes = require("./routes/manualinvoice.routes");
+
 const adminAuthRoutes = require("./routes/adminpannel.routes");
 
 // Mount API routes
@@ -225,6 +226,7 @@ app.use("/api/work-session", workSessionRoutes);
 app.use("/api/digitalmarketing", digitalMarketingRoutes);
 app.use("/api/admin-staff", adminStaffLogin);
 app.use("/api/manual-invoices", manualInvoiceRoutes);
+
 app.use("/api/adminpanel", adminAuthRoutes);
 app.post("/login-sync", require("./controllers/auth.controller").loginSync);
 app.get(

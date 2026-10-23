@@ -1,4 +1,3 @@
-
 // const express = require('express');
 // const router = express.Router();
 // const {
@@ -44,7 +43,6 @@
 
 // module.exports = router;
 
-
 // // routes/projectRoutes.js
 // const express = require('express');
 // const router = express.Router();
@@ -83,12 +81,8 @@
 //     getInvoiceById
 // } = require('../controllers/project.controller');
 
-
-
 // router.get('/options', getProjectOptions);
 // router.get('/stats', getProjectStats);
-
-
 
 // // ==================== REMINDER ROUTES ====================
 // router.post('/sendremainder', sendReminders);
@@ -98,28 +92,23 @@
 // router.get('/remainderstats', getReminderStats);
 // router.get('/debugreminders', debugReminders);
 
-
 // // ==================== CREATE ====================
 // router.post('/create', createProject);
 // router.get('/all', getAllProjects);
 // router.delete('/delete', bulkDeleteProjects);
 // router.delete('/permanent', permanentDeleteProjects);
 
-
 // // ==================== INVOICE ROUTES ====================
 // router.get('/invoices', getInvoices);
 // router.get('/invoices/stats', getInvoiceStats);
-
 
 // router.get('/:id', getProjectById);
 
 // // ==================== UPDATE ====================
 // router.put('/:id', updateProject);
 
-
 // // ==================== DELETE ====================
 // router.put('/:id/restore', restoreProject);
-
 
 // // ==================== INSTALLMENT ROUTES ====================
 // router.post('/:id/installments', addInstallment);
@@ -128,71 +117,80 @@
 // router.delete('/:id/installments/:installmentId', deleteInstallment);
 // router.get('/:id/installments', getInstallments);
 
-
 // module.exports = router;
 
 // routes/projectRoutes.js
-const express = require('express');
+const express = require("express");
 const router = express.Router();
 const {
-    createProject,
-    getAllProjects,
-    getProjectById,
-    getProjectOptions,
-    getProjectStats,
-    updateProject,
-    deleteProject,
-    bulkDeleteProjects,
-    restoreProject,
-    permanentDeleteProjects,
-    addInstallment,
-    markAsPaid,
-    editInstallment,
-    deleteInstallment,
-    getInstallments,
-    sendReminders,
-    getUpcomingInstallments,
-    sendTestReminder,
-    getReminderStats,
-    getTomorrowReminders,
-    debugReminders,
-    getInvoices,
-    getInvoiceStats
-} = require('../controllers/project.controller');
+  createProject,
+  getAllProjects,
+  getProjectById,
+  getProjectOptions,
+  getProjectStats,
+  updateProject,
+  deleteProject,
+  bulkDeleteProjects,
+  restoreProject,
+  permanentDeleteProjects,
+  addProjectInstallment,
+  markAsPaid,
+  editInstallment,
+  deleteInstallment,
+  getInstallments,
+  sendReminders,
+  getUpcomingInstallments,
+  sendTestReminder,
+  getReminderStats,
+  getTomorrowReminders,
+  debugReminders,
+  getInvoices,
+  getInvoiceStats,
+  createInvoices,
+  updateInvoiceStatus,
+  getAllInvoices,
+} = require("../controllers/project.controller");
 
 // ==================== STATISTICS & OPTIONS ====================
-router.get('/stats', getProjectStats);
-router.get('/options', getProjectOptions);
+router.get("/stats", getProjectStats);
+router.get("/options", getProjectOptions);
 
 // ==================== REMINDER ROUTES ====================
-router.post('/sendremainder', sendReminders);
-router.get('/upcominginstallments', getUpcomingInstallments);
-router.get('/tomorrow', getTomorrowReminders);
-router.post('/test/:projectId', sendTestReminder);
-router.get('/remainderstats', getReminderStats);
-router.get('/debugreminders', debugReminders);
+router.post("/sendremainder", sendReminders);
+router.get("/upcominginstallments", getUpcomingInstallments);
+router.get("/tomorrow", getTomorrowReminders);
+router.post("/test/:projectId", sendTestReminder);
+router.get("/remainderstats", getReminderStats);
+router.get("/debugreminders", debugReminders);
 
 // ==================== INVOICE ROUTES ====================
-router.get('/invoices', getInvoices);
-router.get('/invoices/stats', getInvoiceStats);
+// router.get("/invoices", getInvoices);
+// router.get("/invoices/stats", getInvoiceStats);
 
 // ==================== PROJECT CRUD ====================
-router.post('/create', createProject);
-router.get('/all', getAllProjects);
-router.delete('/delete', bulkDeleteProjects);
-router.delete('/permanent', permanentDeleteProjects);
+router.post("/create", createProject);
+router.get("/all", getAllProjects);
+router.post("/:projectId/installments", addProjectInstallment);
+router.post("/:projectId/invoices", createInvoices);
+router.patch(
+  "/:projectId/installments/:installmentId/status",
+  updateInvoiceStatus,
+);
+router.get("/getinvoices", getAllInvoices);
+router.delete("/delete", bulkDeleteProjects);
+router.delete("/permanent", permanentDeleteProjects);
 
 // ==================== PROJECT BY ID ====================
-router.get('/:id', getProjectById);
-router.put('/:id', updateProject);
-router.delete('/:id', deleteProject);
-router.put('/:id/restore', restoreProject);
+router.get("/:id", getProjectById);
+router.put("/:id", updateProject);
+router.delete("/:id", deleteProject);
+router.put("/:id/restore", restoreProject);
 
-// ==================== INSTALLMENT ROUTES ====================
-router.post('/:id/installments', addInstallment);
-router.put('/:id/installments/:installmentId/mark-paid', markAsPaid);
-router.put('/:id/installments/:installmentId', editInstallment);
-router.delete('/:id/installments/:installmentId', deleteInstallment);
-router.get('/:id/installments', getInstallments);
+// // ==================== INSTALLMENT ROUTES ====================
+// router.post("/:id/installments", addInstallment);
+// router.put("/:id/installments/:installmentId/mark-paid", markAsPaid);
+// router.put("/:id/installments/:installmentId", editInstallment);
+// router.delete("/:id/installments/:installmentId", deleteInstallment);
+// router.get("/:id/installments", getInstallments);
 
 module.exports = router;
