@@ -1,128 +1,14 @@
-// const express = require('express');
-// const router = express.Router();
-// const {
-//   getProjectOptions,
-//   createProject,
-//   getAllProjects,
-//   getProjectById,
-//   updateProject,
-//   deleteProject,
-//   addMilestonePayment,
-//   updateMilestonePayment,
-//   deleteMilestonePayment,
-//   addBudgetInstallment,
-//   deleteBudgetInstallment,
-//   addTeamMember,
-//   removeTeamMember,
-//   getProjectStats
-// } = require('../controllers/project.controller');
-
-// // ==================== STATISTICS & OPTIONS (MUST BE BEFORE PARAM ROUTES) ====================
-// router.get('/stats', getProjectStats);
-// router.get('/options', getProjectOptions);
-
-// // ==================== MAIN CRUD ROUTES ====================
-// router.post('/', createProject);
-// router.get('/', getAllProjects);
-// router.get('/:id', getProjectById);
-// router.put('/:id', updateProject);
-// router.delete('/:id', deleteProject);
-
-// // ==================== MILESTONE PAYMENT ROUTES ====================
-// router.post('/:id/milestones', addMilestonePayment);
-// router.put('/:projectId/milestones/:milestoneId', updateMilestonePayment);
-// router.delete('/:projectId/milestones/:milestoneId', deleteMilestonePayment);
-
-// // ==================== BUDGET INSTALLMENT ROUTES ====================
-// router.post('/:id/budget', addBudgetInstallment);
-// router.delete('/:projectId/budget/:installmentId', deleteBudgetInstallment);
-
-// // ==================== TEAM MEMBERS ROUTES ====================
-// router.post('/:id/team', addTeamMember);
-// router.delete('/:id/team/:role/:memberName', removeTeamMember);
-
-// module.exports = router;
-
-// // routes/projectRoutes.js
-// const express = require('express');
-// const router = express.Router();
-// const {
-//     createProject,
-//     createMultipleProjects,
-//     getAllProjects,
-//     getProjectById,
-//     getProjectOptions,
-//     getProjectStats,
-//     updateProject,
-//     deleteProject,
-//     bulkDeleteProjects,
-//     restoreProject,
-//     permanentDeleteProjects,
-
-//     // Milestone Payment Routes
-//     addInstallment,
-//     markAsPaid,
-//     editInstallment,
-//     deleteInstallment,
-//     getInstallments,
-
-//     // Reminder Routes
-//     sendReminders,
-//     getUpcomingInstallments,
-//     sendTestReminder,
-//     getReminderStats,
-//     getTomorrowReminders,
-//     debugReminders,
-
-//     // Invoice Routes
-//     getInvoices,
-//     getInvoiceStats,
-//     getInvoicesByProject,
-//     getInvoiceById
-// } = require('../controllers/project.controller');
-
-// router.get('/options', getProjectOptions);
-// router.get('/stats', getProjectStats);
-
-// // ==================== REMINDER ROUTES ====================
-// router.post('/sendremainder', sendReminders);
-// router.get('/upcominginstallments', getUpcomingInstallments);
-// router.get('/tomorrow', getTomorrowReminders);
-// router.post('/test/:projectId', sendTestReminder);
-// router.get('/remainderstats', getReminderStats);
-// router.get('/debugreminders', debugReminders);
-
-// // ==================== CREATE ====================
-// router.post('/create', createProject);
-// router.get('/all', getAllProjects);
-// router.delete('/delete', bulkDeleteProjects);
-// router.delete('/permanent', permanentDeleteProjects);
-
-// // ==================== INVOICE ROUTES ====================
-// router.get('/invoices', getInvoices);
-// router.get('/invoices/stats', getInvoiceStats);
-
-// router.get('/:id', getProjectById);
-
-// // ==================== UPDATE ====================
-// router.put('/:id', updateProject);
-
-// // ==================== DELETE ====================
-// router.put('/:id/restore', restoreProject);
-
-// // ==================== INSTALLMENT ROUTES ====================
-// router.post('/:id/installments', addInstallment);
-// router.put('/:id/installments/:installmentId/mark-paid', markAsPaid);
-// router.put('/:id/installments/:installmentId', editInstallment);
-// router.delete('/:id/installments/:installmentId', deleteInstallment);
-// router.get('/:id/installments', getInstallments);
-
-// module.exports = router;
-
-// routes/projectRoutes.js
+// routes/project.routes.js
 const express = require("express");
 const router = express.Router();
+
 const {
+  protect,
+  adminOnly,
+} = require("../middleware/auth.middleware");
+
+const {
+  // Project CRUD
   createProject,
   getAllProjects,
   getProjectById,
@@ -133,64 +19,89 @@ const {
   bulkDeleteProjects,
   restoreProject,
   permanentDeleteProjects,
+
+  // Installments
   addProjectInstallment,
+  getInstallments,
   markAsPaid,
   editInstallment,
   deleteInstallment,
-  getInstallments,
+
+  // Reminders
   sendReminders,
   getUpcomingInstallments,
   sendTestReminder,
   getReminderStats,
   getTomorrowReminders,
   debugReminders,
+
+  // Invoices
   getInvoices,
   getInvoiceStats,
   createInvoices,
-  updateInvoiceStatus,
   getAllInvoices,
 } = require("../controllers/project.controller");
 
-// ==================== STATISTICS & OPTIONS ====================
-router.get("/stats", getProjectStats);
-router.get("/options", getProjectOptions);
+/* ============ STATIC ROUTES (must precede "/:id") ============ */
+router.get("/stats", protect, getProjectStats);
+router.get("/options", protect, getProjectOptions);
+router.get("/all", protect, getAllProjects);
+router.get("/getinvoices", protect, getAllInvoices);
 
-// ==================== REMINDER ROUTES ====================
-router.post("/sendremainder", sendReminders);
-router.get("/upcominginstallments", getUpcomingInstallments);
-router.get("/tomorrow", getTomorrowReminders);
-router.post("/test/:projectId", sendTestReminder);
-router.get("/remainderstats", getReminderStats);
-router.get("/debugreminders", debugReminders);
+/* ============ REMINDER ROUTES ============ */
+router.post("/sendremainder", protect, adminOnly, sendReminders);
+router.get("/upcominginstallments", protect, getUpcomingInstallments);
+router.get("/tomorrow", protect, getTomorrowReminders);
+router.post("/test/:projectId", protect, adminOnly, sendTestReminder);
+router.get("/remainderstats", protect, getReminderStats);
+router.get("/debugreminders", protect, adminOnly, debugReminders);
 
-// ==================== INVOICE ROUTES ====================
-// router.get("/invoices", getInvoices);
-// router.get("/invoices/stats", getInvoiceStats);
+/* ============ INVOICE LIST ROUTES ============ */
+router.get("/invoices", protect, getInvoices);
+router.get("/invoices/stats", protect, getInvoiceStats);
 
-// ==================== PROJECT CRUD ====================
-router.post("/create", createProject);
-router.get("/all", getAllProjects);
-router.post("/:projectId/installments", addProjectInstallment);
-router.post("/:projectId/invoices", createInvoices);
-router.patch(
-  "/:projectId/installments/:installmentId/status",
-  updateInvoiceStatus,
+/* ============ PROJECT CREATE ============ */
+router.post("/", protect, adminOnly, createProject);
+router.post("/create", protect, adminOnly, createProject);
+
+/* ============ INSTALLMENTS ============ */
+router.post(
+  "/:projectId/installments",
+  protect,
+  adminOnly,
+  addProjectInstallment,
 );
-router.get("/getinvoices", getAllInvoices);
-router.delete("/delete", bulkDeleteProjects);
-router.delete("/permanent", permanentDeleteProjects);
+router.get("/:projectId/installments", protect, getInstallments);
+router.put(
+  "/:projectId/installments/:installmentId",
+  protect,
+  adminOnly,
+  editInstallment,
+);
+router.delete(
+  "/:projectId/installments/:installmentId",
+  protect,
+  adminOnly,
+  deleteInstallment,
+);
+router.put(
+  "/:projectId/installments/:installmentId/mark-paid",
+  protect,
+  adminOnly,
+  markAsPaid,
+);
 
-// ==================== PROJECT BY ID ====================
-router.get("/:id", getProjectById);
-router.put("/:id", updateProject);
-router.delete("/:id", deleteProject);
-router.put("/:id/restore", restoreProject);
+/* ============ INVOICES (nested) ============ */
+router.post("/:projectId/invoices", protect, adminOnly, createInvoices);
 
-// // ==================== INSTALLMENT ROUTES ====================
-// router.post("/:id/installments", addInstallment);
-// router.put("/:id/installments/:installmentId/mark-paid", markAsPaid);
-// router.put("/:id/installments/:installmentId", editInstallment);
-// router.delete("/:id/installments/:installmentId", deleteInstallment);
-// router.get("/:id/installments", getInstallments);
+/* ============ BULK / PERMANENT DELETE ============ */
+router.delete("/delete", protect, adminOnly, bulkDeleteProjects);
+router.delete("/permanent", protect, adminOnly, permanentDeleteProjects);
+
+/* ============ PROJECT BY ID ============ */
+router.get("/:id", protect, getProjectById);
+router.put("/:id", protect, adminOnly, updateProject);
+router.delete("/:id", protect, adminOnly, deleteProject);
+router.put("/:id/restore", protect, adminOnly, restoreProject);
 
 module.exports = router;

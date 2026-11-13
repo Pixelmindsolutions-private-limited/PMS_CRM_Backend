@@ -1,3 +1,39 @@
+// controllers/project.controller.js
+const mongoose = require("mongoose");
+const Project = require("../models/Project");
+const Client = require("../models/Client");
+const Invoice = require("../models/Invoice");
+
+
+// ✅ Add the helpers here
+const roundAmount = (value) => Number(Number(value).toFixed(2));
+
+const getProjectPaymentTotals = (project) => {
+  const baseCost = Number(project.projectCost || 0);
+  const gstPercent = Number(project.gstPercent || 0);
+
+  const gstAmount = roundAmount((baseCost * gstPercent) / 100);
+  const projectCost = roundAmount(baseCost + gstAmount);
+
+  const totalPaid = roundAmount(
+    (project.installments || []).reduce(
+      (sum, installment) => sum + Number(installment.paidAmount || 0),
+      0
+    )
+  );
+
+  return {
+    projectCost,
+    totalPaid,
+    remainingAmount: roundAmount(Math.max(0, projectCost - totalPaid)),
+  };
+};
+
+
+
+/* ================================================================
+ * CREATE PROJECT — accepts gstPercent only
+ * ================================================================ */
 exports.createProject = async (req, res) => {
   try {
     const {
@@ -12,12 +48,18 @@ exports.createProject = async (req, res) => {
       deadline,
       paymentMilestone,
       category,
+      gstPercent = 18,
       workDivision,
       teamAssignment,
       digitalMarketing,
     } = req.body;
 
-    if (!projectName || !clientName || !mobileNumber || !mailId) {
+    if (
+      !String(projectName || "").trim() ||
+      !String(clientName || "").trim() ||
+      !String(mobileNumber || "").trim() ||
+      !String(mailId || "").trim()
+    ) {
       return res.status(400).json({
         success: false,
         message:
@@ -25,8 +67,28 @@ exports.createProject = async (req, res) => {
       });
     }
 
-    // Reuse an existing client record when supplied; manual client details work without a clientId.
+    const gstRate = Number(gstPercent);
+
+    if (
+      !Number.isFinite(gstRate) ||
+      gstRate < 0 ||
+      gstRate > 100
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "gstPercent must be between 0 and 100",
+      });
+    }
+
+    if (clientId && !mongoose.Types.ObjectId.isValid(clientId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client ID",
+      });
+    }
+
     const client = clientId ? await Client.findById(clientId) : null;
+
     if (clientId && !client) {
       return res.status(404).json({
         success: false,
@@ -34,14 +96,26 @@ exports.createProject = async (req, res) => {
       });
     }
 
-    // ============ HANDLE DIGITAL MARKETING ============
-    let finalProjectCost = projectCost ? Number(projectCost) : 0;
+    let finalProjectCost = Number(projectCost ?? 0);
     let digitalMarketingData = null;
 
     if (category === "digital marketing" && digitalMarketing) {
       const DigitalMarketingPlan = require("../models/DigitalMarketingPlan");
 
-      const plan = await DigitalMarketingPlan.findById(digitalMarketing.planId);
+      if (
+        !digitalMarketing.planId ||
+        !mongoose.Types.ObjectId.isValid(digitalMarketing.planId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid digital marketing plan ID",
+        });
+      }
+
+      const plan = await DigitalMarketingPlan.findById(
+        digitalMarketing.planId
+      );
+
       if (!plan) {
         return res.status(404).json({
           success: false,
@@ -50,8 +124,9 @@ exports.createProject = async (req, res) => {
       }
 
       const durationData = plan.durations.find(
-        (d) => d.duration === digitalMarketing.duration,
+        (item) => item.duration === digitalMarketing.duration
       );
+
       if (!durationData) {
         return res.status(400).json({
           success: false,
@@ -59,7 +134,7 @@ exports.createProject = async (req, res) => {
         });
       }
 
-      finalProjectCost = durationData.price;
+      finalProjectCost = Number(durationData.price);
 
       digitalMarketingData = {
         planId: plan._id,
@@ -70,135 +145,145 @@ exports.createProject = async (req, res) => {
       };
     }
 
-    // ============ WORK DIVISION ============
-    const workDivisionData = workDivision || {
-      designing: 0,
-      frontend: 0,
-      backend: 0,
-      testing: 0,
-      deployment: 0,
-      marketing: 0,
-    };
+    if (!Number.isFinite(finalProjectCost) || finalProjectCost < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "projectCost must be a valid non-negative number",
+      });
+    }
 
-    // ============ TEAM ASSIGNMENT ============
-    const teamAssignmentData = teamAssignment || {
-      designing: [],
-      frontend: [],
-      backend: [],
-      testing: [],
-      deployment: [],
-      marketing: [],
-    };
+    const milestoneCount = Number(paymentMilestone ?? 0);
 
-    // ============ CREATE PROJECT ============
+    if (!Number.isFinite(milestoneCount) || milestoneCount < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "paymentMilestone must be a valid non-negative number",
+      });
+    }
+
     const project = new Project({
       ...(client ? { clientId: client._id } : {}),
+      clientName: client?.name || String(clientName).trim(),
+      mobileNumber: client?.mobile || String(mobileNumber).trim(),
+      mailId: client?.email || String(mailId).trim(),
+      projectName: String(projectName).trim(),
 
-      // ✅ Snapshot client fields
-      clientName: client?.name || clientName.trim(),
-      mobileNumber: client?.mobile || mobileNumber.trim(),
-      mailId: client?.email || mailId.trim(),
+      // Keep the base amount for existing installment calculations.
+      projectCost: roundAmount(finalProjectCost),
+      gstPercent: gstRate,
 
-      projectName: projectName.trim(),
-      projectCost: finalProjectCost,
       projectStartDate: projectStartDate || null,
       projectEndDate: projectEndDate || null,
       deadline: deadline || null,
-      paymentMilestone: paymentMilestone ? Number(paymentMilestone) : 0,
+      paymentMilestone: milestoneCount,
       category: category || "website",
-      workDivision: workDivisionData,
-      teamAssignment: teamAssignmentData,
+
+      workDivision: workDivision || {
+        designing: 0,
+        frontend: 0,
+        backend: 0,
+        testing: 0,
+        deployment: 0,
+        marketing: 0,
+      },
+
+      teamAssignment: teamAssignment || {
+        designing: [],
+        frontend: [],
+        backend: [],
+        testing: [],
+        deployment: [],
+        marketing: [],
+      },
+
       digitalMarketing: digitalMarketingData,
     });
 
     await project.save();
 
-    // ============ POPULATE ============
-    const populatedProject = await Project.findById(project._id)
+    const populated = await Project.findById(project._id)
       .populate("clientId", "name email mobile address")
       .select("-__v");
 
-    res.status(201).json({
+    const totals = getProjectPaymentTotals(populated);
+
+    return res.status(201).json({
       success: true,
       message: "Project created successfully",
       data: {
-        _id: populatedProject._id,
-        projectId: populatedProject.projectId,
-        projectName: populatedProject.projectName,
+        _id: populated._id,
+        projectId: populated.projectId,
+        projectName: populated.projectName,
+        clientName: populated.clientName,
+        mobileNumber: populated.mobileNumber,
+        mailId: populated.mailId,
 
-        // ✅ Snapshot fields
-        clientName: populatedProject.clientName,
-        mobileNumber: populatedProject.mobileNumber,
-        mailId: populatedProject.mailId,
+        // GST-inclusive amount in the existing field.
+        projectCost: totals.projectCost,
+        gstPercent: populated.gstPercent,
 
-        projectCost: populatedProject.projectCost,
-        projectStartDate: populatedProject.projectStartDate,
-        projectEndDate: populatedProject.projectEndDate,
-        deadline: populatedProject.deadline,
-        paymentMilestone: populatedProject.paymentMilestone,
-        category: populatedProject.category,
-        workDivision: populatedProject.workDivision,
-        teamAssignment: populatedProject.teamAssignment,
-        digitalMarketing: populatedProject.digitalMarketing || null,
+        projectStartDate: populated.projectStartDate,
+        projectEndDate: populated.projectEndDate,
+        deadline: populated.deadline,
+        paymentMilestone: populated.paymentMilestone,
+        category: populated.category,
+        workDivision: populated.workDivision,
+        teamAssignment: populated.teamAssignment,
+        digitalMarketing: populated.digitalMarketing || null,
 
-        client: populatedProject.clientId
+        client: populated.clientId
           ? {
-              _id: populatedProject.clientId._id,
-              name: populatedProject.clientId.name,
-              mobile: populatedProject.clientId.mobile,
-              email: populatedProject.clientId.email,
-              address: populatedProject.clientId.address,
+              _id: populated.clientId._id,
+              name: populated.clientId.name,
+              mobile: populated.clientId.mobile,
+              email: populated.clientId.email,
+              address: populated.clientId.address,
             }
           : null,
 
         status: "active",
-        createdAt: populatedProject.createdAt,
-        updatedAt: populatedProject.updatedAt,
+        createdAt: populated.createdAt,
+        updatedAt: populated.updatedAt,
       },
     });
   } catch (error) {
     console.error("Create project error:", error);
+
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
         message: "Duplicate value found. Please try again.",
       });
     }
-    res.status(500).json({
+
+    if (
+      error.name === "ValidationError" ||
+      error.name === "CastError"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
       success: false,
       message: error.message || "Server error while creating project",
     });
   }
 };
-// ==================== READ ====================
 
-// @desc    Get all projects with pagination and filters
-// @route   GET /api/projects
-
+/* ================================================================
+ * READ
+ * ================================================================ */
 exports.getAllProjects = async (req, res) => {
   try {
-    const {
-      search,
-      category,
-      clientId,
-      isDeleted,
-      projectId,
-      projectName,
-      clientName,
-      clientEmail,
-      clientMobile,
-    } = req.query;
+    const { search, category, clientId, isDeleted, projectId, projectName } =
+      req.query;
 
     const query = {};
+    query.isDeleted = isDeleted === "true";
 
-    // Filter by soft delete status
-    if (isDeleted === "true") {
-      query.isDeleted = true;
-    } else {
-      query.isDeleted = false;
-    }
-
-    // General search
     if (search) {
       query.$or = [
         { projectName: { $regex: search, $options: "i" } },
@@ -206,110 +291,66 @@ exports.getAllProjects = async (req, res) => {
         { projectId: { $regex: search, $options: "i" } },
       ];
     }
+    if (projectId) query.projectId = { $regex: projectId, $options: "i" };
+    if (projectName) query.projectName = { $regex: projectName, $options: "i" };
+    if (category) query.category = category;
+    if (clientId) query.clientId = clientId;
 
-    // Filter by projectId
-    if (projectId) {
-      query.projectId = { $regex: projectId, $options: "i" };
-    }
-
-    // Filter by projectName
-    if (projectName) {
-      query.projectName = {
-        $regex: projectName,
-        $options: "i",
-      };
-    }
-
-    // Filter by category
-    if (category) {
-      query.category = category;
-    }
-
-    // Filter by client
-    if (clientId) {
-      query.clientId = clientId;
-    }
-
-    // Fetch all matching projects
-    let projects = await Project.find(query)
+    const projects = await Project.find(query)
       .populate("clientId", "name email mobile address")
       .select("-__v")
       .sort({ createdAt: -1 });
 
-    // Filter by client fields
-    if (clientName) {
-      projects = projects.filter((project) =>
-        project.clientId?.name
-          ?.toLowerCase()
-          .includes(clientName.toLowerCase()),
-      );
-    }
-
-    if (clientEmail) {
-      projects = projects.filter((project) =>
-        project.clientId?.email
-          ?.toLowerCase()
-          .includes(clientEmail.toLowerCase()),
-      );
-    }
-
-    if (clientMobile) {
-      projects = projects.filter((project) =>
-        project.clientId?.mobile?.includes(clientMobile),
-      );
-    }
-
-    // Format projects
-    const formattedProjects = projects.map((project) => ({
-      _id: project._id,
-      projectId: project.projectId,
-      projectName: project.projectName,
-      projectCost: project.projectCost,
-      projectStartDate: project.projectStartDate,
-      projectEndDate: project.projectEndDate,
-      deadline: project.deadline,
-      paymentMilestone: project.paymentMilestone,
-      category: project.category,
-      workDivision: project.workDivision,
-      teamAssignment: project.teamAssignment,
-      digitalMarketing: project.digitalMarketing || null,
-
-      client: {
-        _id: project.clientId?._id,
-        name: project.clientId?.name || "Unknown Client",
-        mobile: project.clientId?.mobile || "",
-        email: project.clientId?.email || "",
-        address: project.clientId?.address || "",
-      },
-
-      installments: project.installments || [],
-      status: project.isDeleted ? "deleted" : "active",
-      deletedAt: project.deletedAt,
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-    }));
-
-    // Response without pagination
     return res.status(200).json({
       success: true,
-      count: formattedProjects.length,
-      data: formattedProjects,
+      count: projects.length,
+      data: projects.map((p) => ({
+        _id: p._id,
+        projectId: p.projectId,
+        projectName: p.projectName,
+        projectCost: p.projectCost,
+        gstPercent: p.gstPercent,
+        totalPaid: p.totalPaid,
+        remainingAmount: p.remainingAmount,
+        projectStartDate: p.projectStartDate,
+        projectEndDate: p.projectEndDate,
+        deadline: p.deadline,
+        paymentMilestone: p.paymentMilestone,
+        category: p.category,
+        workDivision: p.workDivision,
+        teamAssignment: p.teamAssignment,
+        digitalMarketing: p.digitalMarketing || null,
+        client: {
+          _id: p.clientId?._id,
+          name: p.clientId?.name || "Unknown Client",
+          mobile: p.clientId?.mobile || "",
+          email: p.clientId?.email || "",
+          address: p.clientId?.address || "",
+        },
+        installments: p.installments || [],
+        status: p.isDeleted ? "deleted" : "active",
+        deletedAt: p.deletedAt,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+      })),
     });
   } catch (error) {
     console.error("Get all projects error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Get project by ID
-// @route   GET /api/projects/:id
 exports.getProjectById = async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid project ID format",
+      });
+    }
+
     const project = await Project.findById(id)
       .populate("clientId", "name email mobile address")
       .select("-__v");
@@ -321,13 +362,18 @@ exports.getProjectById = async (req, res) => {
       });
     }
 
-    res.json({
+    const totals = getProjectPaymentTotals(project);
+
+    return res.json({
       success: true,
       data: {
         _id: project._id,
         projectId: project.projectId,
         projectName: project.projectName,
-        projectCost: project.projectCost,
+        projectCost: totals.projectCost,
+        gstPercent: project.gstPercent,
+        totalPaid: totals.totalPaid,
+        remainingAmount: totals.remainingAmount,
         projectStartDate: project.projectStartDate,
         projectEndDate: project.projectEndDate,
         deadline: project.deadline,
@@ -336,14 +382,19 @@ exports.getProjectById = async (req, res) => {
         workDivision: project.workDivision,
         teamAssignment: project.teamAssignment,
         digitalMarketing: project.digitalMarketing || null,
+
         client: {
           _id: project.clientId?._id || null,
           name:
-            project.clientId?.name || project.clientName || "Unknown Client",
+            project.clientId?.name ||
+            project.clientName ||
+            "Unknown Client",
           mobile: project.clientId?.mobile || project.mobileNumber || "",
           email: project.clientId?.email || project.mailId || "",
           address: project.clientId?.address || "",
         },
+
+        installments: project.installments,
         status: project.isDeleted ? "deleted" : "active",
         deletedAt: project.deletedAt,
         createdAt: project.createdAt,
@@ -352,101 +403,149 @@ exports.getProjectById = async (req, res) => {
     });
   } catch (error) {
     console.error("Get project error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
-
-// @desc    Get project options for dropdowns
-// @route   GET /api/projects/options
 exports.getProjectOptions = async (req, res) => {
   try {
     const projects = await Project.find({ isDeleted: false })
       .select("projectId projectName category clientId")
       .populate("clientId", "name")
       .sort({ projectName: 1 });
-
-    const formattedOptions = projects.map((project) => ({
-      _id: project._id,
-      projectId: project.projectId,
-      projectName: project.projectName,
-      category: project.category,
-      clientName: project.clientId ? project.clientId.name : "Unknown Client",
-    }));
-
-    res.json({
+    return res.json({
       success: true,
-      data: formattedOptions,
+      data: projects.map((p) => ({
+        _id: p._id,
+        projectId: p.projectId,
+        projectName: p.projectName,
+        category: p.category,
+        clientName: p.clientId ? p.clientId.name : "Unknown Client",
+      })),
     });
   } catch (error) {
     console.error("Get project options error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Get project statistics
-// @route   GET /api/projects/stats
 exports.getProjectStats = async (req, res) => {
   try {
-    const total = await Project.countDocuments({ isDeleted: false });
+    const [total, categoryStats, totalCost, clientStats] =
+      await Promise.all([
+        Project.countDocuments({ isDeleted: false }),
 
-    const categoryStats = await Project.aggregate([
-      { $match: { isDeleted: false } },
-      { $group: { _id: "$category", count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-    ]);
+        Project.aggregate([
+          { $match: { isDeleted: false } },
+          {
+            $group: {
+              _id: "$category",
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { count: -1 } },
+        ]),
 
-    const totalCost = await Project.aggregate([
-      { $match: { isDeleted: false } },
-      { $group: { _id: null, total: { $sum: "$projectCost" } } },
-    ]);
+        Project.aggregate([
+          { $match: { isDeleted: false } },
+          {
+            $project: {
+              costIncludingGST: {
+                $round: [
+                  {
+                    $add: [
+                      { $ifNull: ["$projectCost", 0] },
+                      {
+                        $round: [
+                          {
+                            $divide: [
+                              {
+                                $multiply: [
+                                  { $ifNull: ["$projectCost", 0] },
+                                  { $ifNull: ["$gstPercent", 0] },
+                                ],
+                              },
+                              100,
+                            ],
+                          },
+                          2,
+                        ],
+                      },
+                    ],
+                  },
+                  2,
+                ],
+              },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: "$costIncludingGST" },
+            },
+          },
+        ]),
 
-    const clientStats = await Project.aggregate([
-      { $match: { isDeleted: false } },
-      { $group: { _id: "$clientId", projectCount: { $sum: 1 } } },
-      { $sort: { projectCount: -1 } },
-      { $limit: 10 },
-    ]);
+        Project.aggregate([
+          { $match: { isDeleted: false } },
+          {
+            $group: {
+              _id: "$clientId",
+              projectCount: { $sum: 1 },
+            },
+          },
+          { $sort: { projectCount: -1 } },
+          { $limit: 10 },
+        ]),
+      ]);
+
+    const clientIds = clientStats
+      .map((item) => item._id)
+      .filter(Boolean);
 
     const topClients = await Client.find({
-      _id: { $in: clientStats.map((stat) => stat._id) },
+      _id: { $in: clientIds },
     }).select("name email mobile");
 
-    const formattedClientStats = clientStats.map((stat) => ({
-      client: topClients.find((c) => c._id.toString() === stat._id.toString()),
-      projectCount: stat.projectCount,
-    }));
+    const clientsById = new Map(
+      topClients.map((client) => [String(client._id), client])
+    );
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         totalProjects: total,
-        totalProjectCost: totalCost[0]?.total || 0,
-        categoryStats: categoryStats.map((stat) => ({
-          category: stat._id,
-          count: stat.count,
+        totalProjectCost: roundAmount(totalCost[0]?.total || 0),
+
+        categoryStats: categoryStats.map((item) => ({
+          category: item._id,
+          count: item.count,
         })),
-        topClients: formattedClientStats,
+
+        topClients: clientStats.map((item) => ({
+          client: item._id
+            ? clientsById.get(String(item._id)) || null
+            : null,
+          projectCount: item.projectCount,
+        })),
       },
     });
   } catch (error) {
     console.error("Get stats error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
 
-// ==================== UPDATE ====================
-
-// @desc    Update project
-// @route   PUT /api/projects/:id
+/* ================================================================
+ * UPDATE PROJECT
+ * ================================================================ */
 exports.updateProject = async (req, res) => {
   try {
     const { id } = req.params;
@@ -459,6 +558,7 @@ exports.updateProject = async (req, res) => {
       ],
       isDeleted: { $ne: true },
     });
+
     if (!project) {
       return res.status(404).json({
         success: false,
@@ -466,229 +566,210 @@ exports.updateProject = async (req, res) => {
       });
     }
 
-    // Convert numbers
-    if (updateData.projectCost)
-      updateData.projectCost = Number(updateData.projectCost);
-    if (updateData.paymentMilestone)
-      updateData.paymentMilestone = Number(updateData.paymentMilestone);
+    // Update payload must contain the base cost, excluding GST.
+    if (updateData.projectCost !== undefined) {
+      const cost = Number(updateData.projectCost);
 
-    // Handle workDivision
-    if (updateData.workDivision) {
-      updateData.workDivision = {
-        designing: Number(updateData.workDivision.designing) || 0,
-        frontend: Number(updateData.workDivision.frontend) || 0,
-        backend: Number(updateData.workDivision.backend) || 0,
-        testing: Number(updateData.workDivision.testing) || 0,
-        deployment: Number(updateData.workDivision.deployment) || 0,
-        marketing: Number(updateData.workDivision.marketing) || 0,
-      };
+      if (!Number.isFinite(cost) || cost < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "projectCost must be a valid non-negative number",
+        });
+      }
+
+      updateData.projectCost = roundAmount(cost);
     }
 
-    // Handle teamAssignment
-    if (updateData.teamAssignment) {
-      updateData.teamAssignment = {
-        designing: updateData.teamAssignment.designing || [],
-        frontend: updateData.teamAssignment.frontend || [],
-        backend: updateData.teamAssignment.backend || [],
-        testing: updateData.teamAssignment.testing || [],
-        deployment: updateData.teamAssignment.deployment || [],
-        marketing: updateData.teamAssignment.marketing || [],
-      };
+    if (updateData.paymentMilestone !== undefined) {
+      const milestone = Number(updateData.paymentMilestone);
+
+      if (!Number.isFinite(milestone) || milestone < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "paymentMilestone must be a valid non-negative number",
+        });
+      }
+
+      if (milestone > 0 && project.installments.length > milestone) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot have more than ${milestone} installments`,
+        });
+      }
+
+      updateData.paymentMilestone = milestone;
     }
 
-    // Handle digitalMarketing update
-    if (updateData.digitalMarketing) {
-      // If updating digital marketing, validate plan and duration
-      const { planId, duration } = updateData.digitalMarketing;
-      if (planId && duration) {
-        const DigitalMarketingPlan = require("../models/DigitalMarketingPlan");
-        const plan = await DigitalMarketingPlan.findById(planId);
-        if (!plan) {
-          return res.status(404).json({
-            success: false,
-            message: "Digital marketing plan not found",
-          });
-        }
-        const durationData = plan.durations.find(
-          (d) => d.duration === duration,
-        );
-        if (!durationData) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid duration for this plan",
-          });
-        }
-        // Update project cost if needed
-        if (
-          updateData.projectCost === undefined ||
-          updateData.projectCost === null
-        ) {
-          updateData.projectCost = durationData.price;
-        }
+    if (updateData.gstPercent !== undefined) {
+      const gstRate = Number(updateData.gstPercent);
+
+      if (
+        !Number.isFinite(gstRate) ||
+        gstRate < 0 ||
+        gstRate > 100
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "gstPercent must be between 0 and 100",
+        });
+      }
+
+      updateData.gstPercent = gstRate;
+    }
+
+    // Existing installments/invoices depend on these original values.
+    const costChanged =
+      updateData.projectCost !== undefined &&
+      updateData.projectCost !== Number(project.projectCost);
+
+    const gstChanged =
+      updateData.gstPercent !== undefined &&
+      updateData.gstPercent !== Number(project.gstPercent);
+
+    if (
+      project.installments.length > 0 &&
+      (costChanged || gstChanged)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Project cost or GST cannot be changed after installments are created",
+      });
+    }
+
+    // Only ordinary editable project fields are accepted.
+    const editableFields = [
+      "clientName",
+      "mobileNumber",
+      "mailId",
+      "projectName",
+      "projectCost",
+      "gstPercent",
+      "projectStartDate",
+      "projectEndDate",
+      "deadline",
+      "paymentMilestone",
+      "category",
+      "workDivision",
+      "teamAssignment",
+      "digitalMarketing",
+    ];
+
+    for (const field of editableFields) {
+      if (Object.prototype.hasOwnProperty.call(updateData, field)) {
+        project.set(field, updateData[field]);
       }
     }
 
-    // Remove fields that shouldn't be updated
-    delete updateData._id;
-    delete updateData.createdAt;
-    delete updateData.clientId;
-    delete updateData.projectId;
-    delete updateData.isDeleted;
-    delete updateData.deletedAt;
+    // Runs validation and the model's payment-summary pre-save hook.
+    await project.save();
 
-    const updatedProject = await Project.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    })
+    const updated = await Project.findById(project._id)
       .populate("clientId", "name email mobile address")
       .select("-__v");
 
-    res.json({
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    const totals = getProjectPaymentTotals(updated);
+
+    return res.json({
       success: true,
       message: "Project updated successfully",
       data: {
-        _id: updatedProject._id,
-        projectId: updatedProject.projectId,
-        projectName: updatedProject.projectName,
-        projectCost: updatedProject.projectCost,
-        projectStartDate: updatedProject.projectStartDate,
-        projectEndDate: updatedProject.projectEndDate,
-        deadline: updatedProject.deadline,
-        paymentMilestone: updatedProject.paymentMilestone,
-        category: updatedProject.category,
-        workDivision: updatedProject.workDivision,
-        teamAssignment: updatedProject.teamAssignment,
-        digitalMarketing: updatedProject.digitalMarketing || null,
-        client: {
-          _id: updatedProject.clientId._id,
-          name: updatedProject.clientId.name,
-          mobile: updatedProject.clientId.mobile,
-          email: updatedProject.clientId.email,
-          address: updatedProject.clientId.address,
-        },
-        status: updatedProject.isDeleted ? "deleted" : "active",
-        createdAt: updatedProject.createdAt,
-        updatedAt: updatedProject.updatedAt,
+        ...updated.toObject(),
+        projectCost: totals.projectCost,
+        totalPaid: totals.totalPaid,
+        remainingAmount: totals.remainingAmount,
       },
     });
   } catch (error) {
     console.error("Update project error:", error);
-    res.status(500).json({
+
+    const status =
+      error.name === "ValidationError" || error.name === "CastError"
+        ? 400
+        : 500;
+
+    return res.status(status).json({
       success: false,
       message: error.message,
     });
   }
 };
 
-// ==================== DELETE ====================
-
-// @desc    Bulk delete projects (Soft or Permanent)
-// @route   DELETE /api/projects/bulk?permanent=true
+/* ================================================================
+ * DELETE
+ * ================================================================ */
 exports.bulkDeleteProjects = async (req, res) => {
   try {
     const { projectIds } = req.body;
     const { permanent } = req.query;
-
-    if (!projectIds || !Array.isArray(projectIds) || projectIds.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Project IDs array is required",
-      });
+    if (!Array.isArray(projectIds) || projectIds.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Project IDs array is required" });
     }
+    const projects = await Project.find({ _id: { $in: projectIds } });
+    if (projects.length === 0)
+      return res
+        .status(404)
+        .json({ success: false, message: "No projects found" });
 
-    const projects = await Project.find({
-      _id: { $in: projectIds },
-    });
-
-    if (projects.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No projects found",
-      });
-    }
-
-    // ============ PERMANENT BULK DELETE ============
     if (permanent === "true") {
-      const deletedProjects = projects.map((p) => ({
-        _id: p._id,
-        projectId: p.projectId,
-        projectName: p.projectName,
-      }));
-
-      await Project.deleteMany({
-        _id: { $in: projectIds },
-      });
-
+      await Project.deleteMany({ _id: { $in: projectIds } });
       return res.json({
         success: true,
-        message: `${deletedProjects.length} projects permanently deleted`,
-        data: {
-          deletedCount: deletedProjects.length,
-          deletedProjects: deletedProjects,
-        },
+        message: `${projects.length} projects permanently deleted`,
+        data: { deletedCount: projects.length },
       });
     }
 
-    // ============ SOFT BULK DELETE ============
-    const deletedProjects = [];
+    const deleted = [];
     for (const project of projects) {
       if (!project.isDeleted) {
         project.isDeleted = true;
         project.deletedAt = new Date();
         await project.save();
-        deletedProjects.push({
+        deleted.push({
           _id: project._id,
           projectId: project.projectId,
           projectName: project.projectName,
         });
       }
     }
-
-    res.json({
+    return res.json({
       success: true,
-      message: `${deletedProjects.length} projects deleted successfully`,
-      data: {
-        deletedCount: deletedProjects.length,
-        deletedProjects: deletedProjects,
-      },
+      message: `${deleted.length} projects deleted successfully`,
+      data: { deletedCount: deleted.length, deletedProjects: deleted },
     });
   } catch (error) {
     console.error("Bulk delete error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Soft delete a project
-// @route   DELETE /api/projects/:id
 exports.deleteProject = async (req, res) => {
   try {
-    const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid project ID format",
-      });
-    }
-
-    const project = await Project.findById(id);
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: "Project not found",
-      });
-    }
-
+    if (!mongoose.Types.ObjectId.isValid(req.params.id))
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid project ID format" });
+    const project = await Project.findById(req.params.id);
+    if (!project)
+      return res
+        .status(404)
+        .json({ success: false, message: "Project not found" });
     if (!project.isDeleted) {
       project.isDeleted = true;
       project.deletedAt = new Date();
       await project.save();
     }
-
-    res.json({
+    return res.json({
       success: true,
       message: "Project deleted successfully",
       data: {
@@ -700,39 +781,25 @@ exports.deleteProject = async (req, res) => {
     });
   } catch (error) {
     console.error("Delete project error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Restore deleted project
-// @route   PUT /api/projects/:id/restore
 exports.restoreProject = async (req, res) => {
   try {
-    const { id } = req.params;
-
-    const project = await Project.findById(id);
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: "Project not found",
-      });
-    }
-
-    if (!project.isDeleted) {
-      return res.status(400).json({
-        success: false,
-        message: "Project is not deleted",
-      });
-    }
-
+    const project = await Project.findById(req.params.id);
+    if (!project)
+      return res
+        .status(404)
+        .json({ success: false, message: "Project not found" });
+    if (!project.isDeleted)
+      return res
+        .status(400)
+        .json({ success: false, message: "Project is not deleted" });
     project.isDeleted = false;
     project.deletedAt = null;
     await project.save();
-
-    res.json({
+    return res.json({
       success: true,
       message: "Project restored successfully",
       data: {
@@ -744,851 +811,765 @@ exports.restoreProject = async (req, res) => {
     });
   } catch (error) {
     console.error("Restore project error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Permanently delete projects (Single or Bulk)
-// @route   DELETE /api/projects/:id/permanent (Single)
-// @route   DELETE /api/projects/bulk/permanent (Bulk)
 exports.permanentDeleteProjects = async (req, res) => {
   try {
     const { id } = req.params;
     const { projectIds } = req.body;
-    const ObjectId = require("mongoose").Types.ObjectId;
+    const ObjectId = mongoose.Types.ObjectId;
 
-    // ============ BULK PERMANENT DELETE ============
-    if (projectIds && Array.isArray(projectIds) && projectIds.length > 0) {
-      // Validate each ID format
-      const invalidIds = projectIds.filter((id) => !ObjectId.isValid(id));
-
-      if (invalidIds.length > 0) {
+    if (Array.isArray(projectIds) && projectIds.length > 0) {
+      const invalid = projectIds.filter((p) => !ObjectId.isValid(p));
+      if (invalid.length > 0)
         return res.status(400).json({
           success: false,
           message: "Invalid project ID format",
-          invalidIds: invalidIds,
+          invalidIds: invalid,
         });
-      }
-
-      const projects = await Project.find({
-        _id: { $in: projectIds },
-      });
-
-      if (projects.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: "No projects found",
-        });
-      }
-
-      const deletedProjects = projects.map((p) => ({
-        _id: p._id,
-        projectId: p.projectId,
-        projectName: p.projectName,
-      }));
-
-      await Project.deleteMany({
-        _id: { $in: projectIds },
-      });
-
+      const projects = await Project.find({ _id: { $in: projectIds } });
+      if (projects.length === 0)
+        return res
+          .status(404)
+          .json({ success: false, message: "No projects found" });
+      await Project.deleteMany({ _id: { $in: projectIds } });
       return res.json({
         success: true,
-        message: `${deletedProjects.length} projects permanently deleted`,
-        data: {
-          deletedCount: deletedProjects.length,
-          deletedProjects: deletedProjects,
-        },
+        message: `${projects.length} projects permanently deleted`,
+        data: { deletedCount: projects.length },
       });
     }
 
-    // ============ SINGLE PERMANENT DELETE ============
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "Project ID is required",
-      });
-    }
-
-    // Validate ID format
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid project ID format",
-      });
-    }
-
+    if (!id)
+      return res
+        .status(400)
+        .json({ success: false, message: "Project ID is required" });
+    if (!ObjectId.isValid(id))
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid project ID format" });
     const project = await Project.findById(id);
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: "Project not found",
-      });
-    }
-
-    const projectData = {
-      _id: project._id,
-      projectId: project.projectId,
-      projectName: project.projectName,
-    };
-
+    if (!project)
+      return res
+        .status(404)
+        .json({ success: false, message: "Project not found" });
     await Project.findByIdAndDelete(id);
-
-    res.json({
+    return res.json({
       success: true,
       message: "Project permanently deleted",
-      data: projectData,
+      data: {
+        _id: project._id,
+        projectId: project.projectId,
+        projectName: project.projectName,
+      },
     });
   } catch (error) {
     console.error("Permanent delete error:", error);
-    res.status(500).json({
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ================================================================
+ * ADD INSTALLMENT — GST inherited from PROJECT
+ * ================================================================ */
+exports.addProjectInstallment = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+
+    const {
+      title,
+      type = "amount",
+      value,
+      sacCode = "",
+      dueDate = null,
+      notes = "",
+    } = req.body;
+
+    /* ---------- 1. Validate payload ---------- */
+    if (!title || !String(title).trim()) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Installment title is required" });
+    }
+    if (!["amount", "percentage"].includes(type)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Type must be amount or percentage" });
+    }
+
+    const amountValue = Number(value);
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Installment value must be greater than zero",
+      });
+    }
+
+    /* ---------- 2. Find project ---------- */
+    let project = null;
+    if (mongoose.Types.ObjectId.isValid(projectId)) {
+      project = await Project.findOne({
+        _id: projectId,
+        isDeleted: { $ne: true },
+      });
+    }
+    if (!project) {
+      project = await Project.findOne({
+        projectId,
+        isDeleted: { $ne: true },
+      });
+    }
+    if (!project) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Project not found" });
+    }
+
+    /* ---------- 3. Resolve client ---------- */
+    let client = null;
+    if (
+      project.clientId &&
+      mongoose.Types.ObjectId.isValid(String(project.clientId))
+    ) {
+      client = await Client.findById(project.clientId);
+    }
+    if (!client && project.mailId) {
+      const email = String(project.mailId).trim();
+      client = await Client.findOne({
+        email: {
+          $regex: `^${email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+          $options: "i",
+        },
+      });
+    }
+    if (!client && project.mobileNumber) {
+      const mobile = String(project.mobileNumber).replace(/\D/g, "");
+      if (mobile) {
+        const clients = await Client.find();
+        const matches = clients.filter(
+          (c) => String(c.mobile || "").replace(/\D/g, "") === mobile,
+        );
+        if (matches.length === 1) client = matches[0];
+      }
+    }
+
+    let createClientFromProject = false;
+    if (!client) {
+      const clientName = String(project.clientName || "").trim();
+      const email = String(project.mailId || "").trim();
+      const mobile = String(project.mobileNumber || "").trim();
+
+      if (clientName) {
+        const escaped = clientName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const matches = await Client.find({
+          name: { $regex: `^\\s*${escaped}\\s*$`, $options: "i" },
+        }).limit(2);
+        if (matches.length === 1) client = matches[0];
+        if (matches.length > 1) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Multiple clients match this project name; link the correct clientId first.",
+          });
+        }
+      }
+      if (!client && clientName && (email || mobile)) {
+        createClientFromProject = true;
+      }
+    }
+
+    if (!client && !createClientFromProject) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Client not found. Add a client name and email or mobile number to the project.",
+      });
+    }
+
+    /* ---------- 4. Installment limit check ---------- */
+    if (
+      project.paymentMilestone > 0 &&
+      project.installments.length >= project.paymentMilestone
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum ${project.paymentMilestone} installments allowed`,
+      });
+    }
+
+    /* ---------- 5. Compute principal + GST (from project.gstPercent) ---------- */
+    const principalAmount =
+      type === "percentage"
+        ? (amountValue / 100) * Number(project.projectCost)
+        : amountValue;
+
+    const gstRate = Number(project.gstPercent || 0);
+    const gstAmount = Number(((principalAmount * gstRate) / 100).toFixed(2));
+    const totalAmount = Number((principalAmount + gstAmount).toFixed(2));
+
+    /* ---------- 6. Guard: not exceed unallocated project cost ---------- */
+    const allocatedAmount = project.installments.reduce((sum, inst) => {
+      const p =
+        inst.type === "percentage"
+          ? (Number(inst.value) / 100) * Number(project.projectCost)
+          : Number(inst.value);
+      return sum + p;
+    }, 0);
+
+    if (
+      allocatedAmount + principalAmount >
+      Number(project.projectCost) + 0.01
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Installment exceeds remaining unallocated project cost",
+        projectCost: project.projectCost,
+        allocatedAmount: Number(allocatedAmount.toFixed(2)),
+        requestedAmount: Number(principalAmount.toFixed(2)),
+        unallocatedBalance: Number(
+          (project.projectCost - allocatedAmount).toFixed(2),
+        ),
+      });
+    }
+
+    /* ---------- 7. Save atomically ---------- */
+    let savedInstallment;
+    const session = await mongoose.startSession();
+
+    try {
+      await session.withTransaction(async () => {
+        project = await Project.findById(project._id).session(session);
+        if (!project) throw new Error("Project not found during save");
+
+        let txClient = null;
+        if (
+          project.clientId &&
+          mongoose.Types.ObjectId.isValid(String(project.clientId))
+        ) {
+          txClient = await Client.findById(project.clientId).session(session);
+        }
+        if (!txClient && client && !createClientFromProject) {
+          txClient = await Client.findById(client._id).session(session);
+        }
+        if (!txClient && createClientFromProject) {
+          const [created] = await Client.create(
+            [
+              {
+                name: String(project.clientName).trim(),
+                email: String(project.mailId || "").trim(),
+                mobile: String(project.mobileNumber || "").trim(),
+              },
+            ],
+            { session },
+          );
+          txClient = created;
+        }
+        if (txClient) client = txClient;
+        if (!client) throw new Error("A valid Client record is required");
+        project.clientId = client._id;
+
+        // ⚠️ HARD RULE: installment is ALWAYS created as unpaid.
+        // No invoice is generated here. totalPaid is NOT affected.
+        project.installments.push({
+          title: String(title).trim(),
+          type,
+          value: amountValue,
+          sacCode: String(sacCode || "").trim(),
+          gstAmount,
+          totalAmount,
+          dueDate: dueDate || null,
+          paymentDate: null,
+          status: "pending",        // legacy field, kept for compatibility
+          paymentStatus: "unpaid",  // ← always unpaid at creation
+          paidAmount: 0,            // ← always zero at creation
+          requestedAmount: 0,
+          pendingRequestId: null,
+          notes: String(notes || "").trim(),
+        });
+
+        savedInstallment =
+          project.installments[project.installments.length - 1];
+
+        project.calculatePaymentSummary();
+        await project.save({ session });
+        // No invoice creation here — invoices are only created on approval.
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    /* ---------- 8. Respond ---------- */
+    const totalAllocated = allocatedAmount + principalAmount;
+    const unallocatedBalance = Number(
+      Math.max(0, project.projectCost - totalAllocated).toFixed(2),
+    );
+
+    return res.status(201).json({
+      success: true,
+      message:
+        "Installment saved as unpaid. Invoice will be generated after admin approval of client payment.",
+      data: {
+        projectId: project.projectId,
+        installmentId: savedInstallment._id,
+        invoiceId: null,
+        invoiceNumber: null,
+        installment: savedInstallment,
+        taxRate: { gstPercent: project.gstPercent },
+        totalPaid: project.totalPaid,
+        remainingAmount: project.remainingAmount,
+        unallocatedBalance,
+      },
+    });
+  } catch (error) {
+    console.error("Add project installment error:", error);
+    return res.status(500).json({
       success: false,
-      message: error.message,
+      message: error.message || "Failed to add installment",
     });
   }
 };
 
-// // ==================== INSTALLMENTS OPERATIONS ====================
 
-// // @desc    Add installment to project
-// // @route   POST /api/projects/:id/installments
-// exports.addInstallment = async (req, res) => {
-//   try {
-//     const id = req.params.projectId || req.params.id;
-//     const { title, type, value, dueDate } = req.body;
+/* ================================================================
+ * GET INSTALLMENTS
+ * ================================================================ */
+exports.getInstallments = async (req, res) => {
+  try {
+    const { projectId } = req.params;
 
-//     if (!title || !type || !value) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Title, type, and value are required",
-//       });
-//     }
+    const filter = { isDeleted: { $ne: true } };
+    if (mongoose.Types.ObjectId.isValid(projectId)) filter._id = projectId;
+    else filter.projectId = projectId;
 
-//     const project = await Project.findOne({
-//       $or: [
-//         ...(mongoose.Types.ObjectId.isValid(id) ? [{ _id: id }] : []),
-//         { projectId: id },
-//       ],
-//       isDeleted: { $ne: true },
-//     });
-//     if (!project) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Project not found",
-//       });
-//     }
-
-//     // Check if installments exceed milestones
-//     if (project.installments.length >= project.paymentMilestone) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `Cannot add more than ${project.paymentMilestone} installments`,
-//       });
-//     }
-
-//     const installment = {
-//       title,
-//       type,
-//       value,
-//       dueDate: dueDate || null,
-//       status: "pending",
-//     };
-
-//     project.installments.push(installment);
-//     await project.save();
-
-//     res.status(201).json({
-//       success: true,
-//       message: "Installment added successfully",
-//       data: {
-//         projectId: project.projectId,
-//         projectName: project.projectName,
-//         installments: project.installments,
-//         totalPaid: project.totalPaid,
-//         remainingAmount: project.remainingAmount,
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Add installment error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: error.message,
-//     });
-//   }
-// };
-
-// // @desc    Edit installment details
-// // @route   PUT /api/projects/:id/installments/:installmentId
-// exports.editInstallment = async (req, res) => {
-//   try {
-//     const { id, installmentId } = req.params;
-//     const { title, type, value, dueDate } = req.body;
-
-//     const project = await Project.findById(id);
-//     if (!project) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Project not found",
-//       });
-//     }
-
-//     const installment = project.installments.id(installmentId);
-//     if (!installment) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Installment not found",
-//       });
-//     }
-
-//     if (installment.status === "paid") {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Cannot edit paid installment",
-//       });
-//     }
-
-//     if (title) installment.title = title;
-//     if (type) installment.type = type;
-//     if (value !== undefined && value !== null) installment.value = value;
-//     if (dueDate !== undefined) installment.dueDate = dueDate;
-
-//     await project.save();
-
-//     res.json({
-//       success: true,
-//       message: "Installment updated successfully",
-//       data: {
-//         projectId: project.projectId,
-//         projectName: project.projectName,
-//         installments: project.installments,
-//         totalPaid: project.totalPaid,
-//         remainingAmount: project.remainingAmount,
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Edit installment error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: error.message,
-//     });
-//   }
-// };
-
-// // @desc    Delete installment
-// // @route   DELETE /api/projects/:id/installments/:installmentId
-// exports.deleteInstallment = async (req, res) => {
-//   try {
-//     const { id, installmentId } = req.params;
-
-//     const project = await Project.findById(id);
-//     if (!project) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Project not found",
-//       });
-//     }
-
-//     const installment = project.installments.id(installmentId);
-//     if (!installment) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Installment not found",
-//       });
-//     }
-
-//     if (installment.status === "paid") {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Cannot delete paid installment",
-//       });
-//     }
-
-//     project.installments = project.installments.filter(
-//       (i) => i._id.toString() !== installmentId,
-//     );
-
-//     await project.save();
-
-//     res.json({
-//       success: true,
-//       message: "Installment deleted successfully",
-//       data: {
-//         projectId: project.projectId,
-//         projectName: project.projectName,
-//         installments: project.installments,
-//         totalPaid: project.totalPaid,
-//         remainingAmount: project.remainingAmount,
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Delete installment error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: error.message,
-//     });
-//   }
-// };
-
-// // @desc    Get all installments
-// // @route   GET /api/projects/:id/installments
-// exports.getInstallments = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-
-//     const project = await Project.findById(id).select(
-//       "projectId projectName projectCost installments totalPaid remainingAmount paymentMilestone",
-//     );
-
-//     if (!project) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Project not found",
-//       });
-//     }
-
-//     const totalInstallments = project.installments.length;
-//     const paidInstallments = project.installments.filter(
-//       (i) => i.status === "paid",
-//     ).length;
-//     const pendingInstallments = project.installments.filter(
-//       (i) => i.status === "pending",
-//     ).length;
-//     const overdueInstallments = project.installments.filter(
-//       (i) =>
-//         i.status === "pending" && i.dueDate && new Date(i.dueDate) < new Date(),
-//     ).length;
-
-//     res.json({
-//       success: true,
-//       data: {
-//         projectId: project.projectId,
-//         projectName: project.projectName,
-//         projectCost: project.projectCost,
-//         totalPaid: project.totalPaid,
-//         remainingAmount: project.remainingAmount,
-//         maxInstallments: project.paymentMilestone,
-//         installments: project.installments,
-//         summary: {
-//           totalInstallments,
-//           paidInstallments,
-//           pendingInstallments,
-//           overdueInstallments,
-//         },
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Get installments error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: error.message,
-//     });
-//   }
-// };
-
-// // @desc    Mark installment as paid & send invoice with PDF
-// // @route   PUT /api/projects/:id/installments/:installmentId/mark-paid
-// exports.markAsPaid = async (req, res) => {
-//   try {
-//     const { id, installmentId } = req.params;
-//     const { paymentMode, transactionId, applyGst } = req.body;
-
-//     const project = await Project.findById(id).populate("clientId");
-//     if (!project) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Project not found",
-//       });
-//     }
-
-//     const installment = project.installments.id(installmentId);
-//     if (!installment) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Installment not found",
-//       });
-//     }
-
-//     if (installment.status === "paid") {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Installment already paid",
-//       });
-//     }
-
-//     // Mark as paid
-//     installment.status = "paid";
-//     await project.save();
-
-//     // ============ GENERATE INVOICE ============
-//     let invoice = null;
-//     let pdfBuffer = null;
-
-//     try {
-//       // Calculate amount
-//       let amount = 0;
-//       if (installment.type === "percentage") {
-//         amount = (installment.value / 100) * project.projectCost;
-//       } else {
-//         amount = installment.value;
-//       }
-
-//       // ============ GST BASED ON BOOLEAN FLAG ============
-//       // Get tax rate from .env (default 18)
-//       const taxRate = parseFloat(process.env.TAX_RATE) || 18;
-//       const shouldApplyGst = applyGst === true;
-//       const tax = shouldApplyGst ? (amount * taxRate) / 100 : 0;
-//       const totalAmount = amount + tax;
-
-//       // Create invoice
-//       invoice = new Invoice({
-//         projectId: project._id,
-//         clientId: project.clientId._id,
-//         installmentId: installment._id,
-//         installmentTitle: installment.title,
-//         amount: amount,
-//         tax: tax,
-//         totalAmount: totalAmount,
-//         status: "generated",
-//         dueDate: installment.dueDate || new Date(),
-//         paymentDate: new Date(),
-//         paymentMode: paymentMode || "cash",
-//         transactionId: transactionId || "",
-//       });
-
-//       await invoice.save();
-
-//       // ============ GENERATE PDF ============
-//       pdfBuffer = await generatePDFReceipt(invoice, project, project.clientId);
-
-//       // ============ SAVE PDF TO DISK ============
-//       const pdfFileName = `invoice-${invoice.invoiceNumber}.pdf`;
-
-//       const invoicesDir = path.join(__dirname, "../uploads/invoices");
-//       if (!fs.existsSync(invoicesDir)) {
-//         fs.mkdirSync(invoicesDir, { recursive: true });
-//       }
-
-//       const pdfPath = path.join(invoicesDir, pdfFileName);
-//       fs.writeFileSync(pdfPath, pdfBuffer);
-
-//       const baseUrl =
-//         process.env.BASE_URL || "https://pmsbackend.pixelmindsolutions.com";
-//       const pdfUrl = `${baseUrl}/uploads/invoices/${pdfFileName}`;
-
-//       // ============ UPDATE INVOICE WITH PDF PATHS ============
-//       invoice.invoicePdf = pdfPath;
-//       invoice.invoicePdfURL = pdfUrl;
-//       await invoice.save();
-
-//       console.log(`✅ PDF saved: ${pdfPath}`);
-//       console.log(`✅ PDF URL: ${pdfUrl}`);
-
-//       // ============ SEND EMAIL ============
-//       const client = project.clientId;
-//       const htmlContent = getInvoiceEmailHTML(client, project, invoice);
-
-//       const mailOptions = {
-//         from: process.env.MAIL_USER,
-//         to: client.email,
-//         cc: process.env.MAIL_USER,
-//         subject: `✅ Payment Receipt - ${invoice.invoiceNumber}`,
-//         html: htmlContent,
-//         attachments: [
-//           {
-//             filename: `invoice-${invoice.invoiceNumber}.pdf`,
-//             content: pdfBuffer,
-//             contentType: "application/pdf",
-//           },
-//         ],
-//       };
-
-//       await transporter.sendMail(mailOptions);
-
-//       invoice.status = "sent";
-//       invoice.sentAt = new Date();
-//       await invoice.save();
-
-//       console.log(
-//         `✅ Invoice ${invoice.invoiceNumber} sent to ${client.email} with PDF`,
-//       );
-//     } catch (error) {
-//       console.error("Invoice generation/email error:", error);
-//     }
-
-//     res.json({
-//       success: true,
-//       message: "Installment marked as paid. Invoice sent to client.",
-//       data: {
-//         projectId: project.projectId,
-//         projectName: project.projectName,
-//         installment: {
-//           _id: installment._id,
-//           title: installment.title,
-//           type: installment.type,
-//           value: installment.value,
-//           status: installment.status,
-//           dueDate: installment.dueDate,
-//         },
-//         totalPaid: project.totalPaid,
-//         remainingAmount: project.remainingAmount,
-//         invoice: invoice
-//           ? {
-//               _id: invoice._id,
-//               invoiceNumber: invoice.invoiceNumber,
-//               amount: invoice.amount,
-//               tax: invoice.tax,
-//               totalAmount: invoice.totalAmount,
-//               status: invoice.status,
-//               paymentDate: invoice.paymentDate,
-//               transactionId: invoice.transactionId,
-//               invoicePdf: invoice.invoicePdf,
-//               invoicePdfURL: invoice.invoicePdfURL,
-//               gstApplied: applyGst === true,
-//             }
-//           : null,
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Mark as paid error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: error.message,
-//     });
-//   }
-// };
-// // Email Template
-// function getInvoiceEmailHTML(client, project, invoice) {
-//   return `
-//     <!DOCTYPE html>
-//     <html>
-//     <head>
-//         <style>
-//             body { font-family: Arial, sans-serif; }
-//             .container { max-width: 600px; margin: auto; padding: 20px; }
-//             .header { background: #1a6354; color: white; padding: 20px; text-align: center; }
-//             .content { padding: 20px; }
-//             .details { margin: 20px 0; padding: 15px; background: #f8fafc; border-radius: 5px; }
-//             .footer { text-align: center; padding: 15px; color: #64748b; border-top: 1px solid #e2e8f0; margin-top: 20px; }
-//             .paid-badge { background: #1a6354; color: white; padding: 8px 20px; border-radius: 20px; display: inline-block; font-weight: bold; }
-//         </style>
-//     </head>
-//     <body>
-//         <div class="container">
-//             <div class="header">
-//                 <h2>✅ Payment Confirmation</h2>
-//             </div>
-//             <div class="content">
-//                 <h3>Dear ${client.name},</h3>
-//                 <p>We are pleased to inform you that your payment has been successfully received.</p>
-
-//                 <div style="text-align: center; margin: 20px 0;">
-//                     <span class="paid-badge">✅ PAID</span>
-//                 </div>
-
-//                 <div class="details">
-//                     <table style="width: 100%; border-collapse: collapse;">
-//                         <tr>
-//                             <td><strong>Invoice #:</strong></td>
-//                             <td>${invoice.invoiceNumber}</td>
-//                         </tr>
-//                         <tr>
-//                             <td><strong>Project:</strong></td>
-//                             <td>${project.projectName}</td>
-//                         </tr>
-//                         <tr>
-//                             <td><strong>Installment:</strong></td>
-//                             <td>${invoice.installmentTitle}</td>
-//                         </tr>
-//                         <tr>
-//                             <td><strong>Amount Paid:</strong></td>
-//                             <td><strong>₹${invoice.totalAmount.toFixed(2)}</strong></td>
-//                         </tr>
-//                         <tr>
-//                             <td><strong>Payment Date:</strong></td>
-//                             <td>${new Date().toLocaleDateString()}</td>
-//                         </tr>
-//                         <tr>
-//                             <td><strong>Payment Mode:</strong></td>
-//                             <td>${invoice.paymentMode || "Cash"}</td>
-//                         </tr>
-//                         ${
-//                           invoice.transactionId
-//                             ? `<tr>
-//                             <td><strong>Transaction ID:</strong></td>
-//                             <td>${invoice.transactionId}</td>
-//                         </tr>`
-//                             : ""
-//                         }
-//                     </table>
-//                 </div>
-
-//                 <p style="margin-top: 20px;">
-//                     <strong>Payment Summary:</strong><br>
-//                     Total Project Cost: ₹${project.projectCost.toFixed(2)}<br>
-//                     Total Paid: ₹${project.totalPaid.toFixed(2)}<br>
-//                     Remaining Amount: ₹${project.remainingAmount.toFixed(2)}
-//                 </p>
-
-//                 <p>Please find your invoice attached as a PDF for your records.</p>
-//             </div>
-//             <div class="footer">
-//                 <p>Thank you for your business!</p>
-//                 <p><strong>${process.env.COMPANY_NAME || "Pixel Mind Solutions"}</strong></p>
-//                 <p>${process.env.COMPANY_EMAIL || "info@pixelmindsolutions.com"} | ${process.env.COMPANY_PHONE || "+919666317749"}</p>
-//             </div>
-//         </div>
-//     </body>
-//     </html>
-//     `;
-// }
-
-// Send reminder email (reused from cron)
-const sendReminderEmail = (
-  clientEmail,
-  clientName,
-  installment,
-  projectName,
-) => {
-  const mailOptions = {
-    from: process.env.MAIL_USER,
-    to: clientEmail,
-    cc: process.env.COMPANY_EMAIL || process.env.MAIL_USER,
-    bcc: process.env.COMPANY_BCC_EMAIL || "",
-    subject: `⏰ Installment Reminder - ${projectName}`,
-    html: `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    body { font-family: Arial, sans-serif; }
-                    .container { max-width: 600px; margin: auto; padding: 20px; }
-                    .header { background: #2c3e50; color: white; padding: 15px; text-align: center; }
-                    .content { padding: 20px; }
-                    .details { margin: 20px 0; }
-                    .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
-                    .footer { text-align: center; padding: 15px; color: #777; border-top: 1px solid #eee; margin-top: 20px; }
-                    .highlight { color: #e74c3c; font-weight: bold; }
-                    .company-logo { font-size: 20px; font-weight: bold; color: white; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <div class="company-logo">${process.env.COMPANY_NAME || "Your Company"}</div>
-                        <h2>⏰ Installment Reminder</h2>
-                    </div>
-                    <div class="content">
-                        <h3>Hello ${clientName},</h3>
-                        <p>This is a reminder for your upcoming installment.</p>
-                        
-                        <div class="details">
-                            <div class="detail-row">
-                                <span><strong>Project:</strong></span>
-                                <span>${projectName}</span>
-                            </div>
-                            <div class="detail-row">
-                                <span><strong>Installment:</strong></span>
-                                <span>${installment.title}</span>
-                            </div>
-                            <div class="detail-row">
-                                <span><strong>Amount:</strong></span>
-                                <span class="highlight">${installment.type === "percentage" ? installment.value + "%" : "₹" + installment.value}</span>
-                            </div>
-                            <div class="detail-row">
-                                <span><strong>Due Date:</strong></span>
-                                <span class="highlight">${installment.dueDate ? new Date(installment.dueDate).toLocaleDateString() : "N/A"}</span>
-                            </div>
-                            <div class="detail-row">
-                                <span><strong>Status:</strong></span>
-                                <span>${installment.status === "pending" ? "⏳ Pending" : "✅ Paid"}</span>
-                            </div>
-                        </div>
-
-                        <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0;">
-                            <p><strong>📌 Please Note:</strong></p>
-                            <p>Please ensure the payment is completed on time to avoid any delay in the project.</p>
-                            <p>If you have already made the payment, please ignore this email.</p>
-                        </div>
-
-                        <div style="text-align: center; margin: 20px 0;">
-                            <p style="color: #777; font-size: 12px;">
-                                This is an automated reminder. Please do not reply to this email.
-                            </p>
-                        </div>
-                    </div>
-                    <div class="footer">
-                        <p>Thank you for your business!</p>
-                        <p><strong>${process.env.COMPANY_NAME || "Your Company"}</strong></p>
-                        <p>${process.env.COMPANY_EMAIL || "info@yourcompany.com"} | ${process.env.COMPANY_PHONE || "1234567890"}</p>
-                        <p style="font-size: 12px; color: #999;">
-                            ${process.env.COMPANY_ADDRESS || ""}
-                        </p>
-                    </div>
-                </div>
-            </body>
-            </html>
-        `,
-  };
-
-  transporter.sendMail(mailOptions, (err, info) => {
-    if (err) {
-      console.error(`❌ Error sending email to ${clientEmail}:`, err);
-    } else {
-      console.log(
-        `✅ Reminder email sent to ${clientEmail} for ${projectName}`,
-      );
-      if (process.env.COMPANY_EMAIL) {
-        console.log(`📧 CC sent to company: ${process.env.COMPANY_EMAIL}`);
-      }
+    const project = await Project.findOne(filter).select(
+      "projectId projectName projectCost gstPercent paymentMilestone installments totalPaid remainingAmount",
+    );
+    if (!project) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Project not found" });
     }
-  });
+
+    const installments = project.installments.map((i) => ({
+      _id: i._id,
+      title: i.title,
+      type: i.type,
+      value: i.value,
+      sacCode: i.sacCode,
+      gstAmount: i.gstAmount,
+      totalAmount: i.totalAmount,
+      dueDate: i.dueDate,
+      paymentDate: i.paymentDate,
+      status: i.status,
+      paymentStatus: i.paymentStatus,
+      paidAmount: i.paidAmount,
+      requestedAmount: i.requestedAmount,
+      pendingRequestId: i.pendingRequestId,
+      invoiceNumber: i.invoiceNumber,
+      notes: i.notes,
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        projectId: project.projectId,
+        projectName: project.projectName,
+        projectCost: project.projectCost,
+        gstPercent: project.gstPercent,
+        totalPaid: project.totalPaid,
+        remainingAmount: project.remainingAmount,
+        maxInstallments: project.paymentMilestone,
+        installments,
+        summary: {
+          totalInstallments: installments.length,
+          paid: installments.filter((i) => i.paymentStatus === "paid").length,
+          pendingApproval: installments.filter(
+            (i) => i.paymentStatus === "pending_approval",
+          ).length,
+          partialApproved: installments.filter(
+            (i) => i.paymentStatus === "partial_approved",
+          ).length,
+          unpaid: installments.filter((i) => i.paymentStatus === "unpaid")
+            .length,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("getInstallments error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
 };
 
-// ==================== CONTROLLER FUNCTIONS ====================
+/* ================================================================
+ * EDIT INSTALLMENT — NO GST fields (uses project GST via helper)
+ * ================================================================ */
+exports.editInstallment = async (req, res) => {
+  try {
+    const { projectId, installmentId } = req.params;
+    const { title, type, value, dueDate, sacCode, notes } = req.body;
 
-// @desc    Send reminder emails manually (same logic as cron)
-// @route   POST /api/reminders/send
+    const filter = { isDeleted: { $ne: true } };
+    if (mongoose.Types.ObjectId.isValid(projectId)) filter._id = projectId;
+    else filter.projectId = projectId;
+
+    const project = await Project.findOne(filter);
+    if (!project)
+      return res
+        .status(404)
+        .json({ success: false, message: "Project not found" });
+
+    const inst = project.installments.id(installmentId);
+    if (!inst)
+      return res
+        .status(404)
+        .json({ success: false, message: "Installment not found" });
+
+    if (inst.paymentStatus === "paid") {
+      return res
+        .status(400)
+        .json({ success: false, message: "Cannot edit a paid installment" });
+    }
+    if (inst.paymentStatus === "pending_approval") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Installment has a pending payment request. Approve or reject it first.",
+      });
+    }
+
+    if (title !== undefined) inst.title = String(title).trim();
+    if (type !== undefined) inst.type = type;
+    if (value !== undefined) inst.value = Number(value);
+    if (dueDate !== undefined)
+      inst.dueDate = dueDate ? new Date(dueDate) : null;
+    if (sacCode !== undefined) inst.sacCode = String(sacCode).trim();
+    if (notes !== undefined) inst.notes = String(notes).trim();
+
+    // Recompute using project GST
+    project.recalcInstallmentTax(inst);
+
+    project.calculatePaymentSummary();
+    await project.save();
+
+    return res.json({
+      success: true,
+      message: "Installment updated",
+      data: {
+        installment: inst,
+        taxRate: { gstPercent: project.gstPercent },
+        project: {
+          projectId: project.projectId,
+          totalPaid: project.totalPaid,
+          remainingAmount: project.remainingAmount,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("editInstallment error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ================================================================
+ * DELETE INSTALLMENT
+ * ================================================================ */
+exports.deleteInstallment = async (req, res) => {
+  try {
+    const { projectId, installmentId } = req.params;
+
+    const filter = { isDeleted: { $ne: true } };
+    if (mongoose.Types.ObjectId.isValid(projectId)) filter._id = projectId;
+    else filter.projectId = projectId;
+
+    const project = await Project.findOne(filter);
+    if (!project)
+      return res
+        .status(404)
+        .json({ success: false, message: "Project not found" });
+
+    const inst = project.installments.id(installmentId);
+    if (!inst)
+      return res
+        .status(404)
+        .json({ success: false, message: "Installment not found" });
+
+    if (
+      inst.paymentStatus === "paid" ||
+      inst.paymentStatus === "pending_approval"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Cannot delete a paid or pending-approval installment. Reject the payment first.",
+      });
+    }
+
+    project.installments = project.installments.filter(
+      (i) => String(i._id) !== String(installmentId),
+    );
+    project.calculatePaymentSummary();
+    await project.save();
+
+    return res.json({
+      success: true,
+      message: "Installment deleted",
+      data: {
+        projectId: project.projectId,
+        totalPaid: project.totalPaid,
+        remainingAmount: project.remainingAmount,
+      },
+    });
+  } catch (error) {
+    console.error("deleteInstallment error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ================================================================
+ * MARK INSTALLMENT PAID
+ * ================================================================ */
+exports.markAsPaid = async (req, res) => {
+  try {
+    const { projectId, installmentId } = req.params;
+    const { paymentMode = "cash", transactionId = "", paymentDate } = req.body;
+
+    const filter = { isDeleted: { $ne: true } };
+    if (mongoose.Types.ObjectId.isValid(projectId)) filter._id = projectId;
+    else filter.projectId = projectId;
+
+    const project = await Project.findOne(filter);
+    if (!project)
+      return res
+        .status(404)
+        .json({ success: false, message: "Project not found" });
+
+    const inst = project.installments.id(installmentId);
+    if (!inst)
+      return res
+        .status(404)
+        .json({ success: false, message: "Installment not found" });
+
+    if (inst.paymentStatus === "paid") {
+      return res
+        .status(400)
+        .json({ success: false, message: "Installment already paid" });
+    }
+
+    // ⚠️ REQUIRE a pending client payment request
+    if (!inst.pendingRequestId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "No pending client payment request for this installment. " +
+          "Client must submit a payment first, then you can approve it.",
+      });
+    }
+
+    // Load the pending request
+    const PaymentRequest = require("../models/PaymentRequest");
+    const paymentRequest = await PaymentRequest.findById(
+      inst.pendingRequestId,
+    );
+    if (!paymentRequest || paymentRequest.status !== "pending") {
+      return res.status(400).json({
+        success: false,
+        message: "No valid pending payment request found for this installment.",
+      });
+    }
+
+    // ✅ Use the CLIENT'S actual paid amount, not the full installment value
+    const paid = Number(paymentRequest.paidAmount);
+    const newPaidAmount = Number(
+      (Number(inst.paidAmount || 0) + paid).toFixed(2),
+    );
+    const expected =
+      inst.type === "percentage"
+        ? (Number(inst.value) / 100) * Number(project.projectCost)
+        : Number(inst.value);
+
+    inst.paidAmount = newPaidAmount;
+    inst.requestedAmount = paid;
+    inst.paymentDate = paymentDate ? new Date(paymentDate) : new Date();
+    inst.pendingRequestId = null;
+
+    if (newPaidAmount + 0.01 >= expected) {
+      inst.paymentStatus = "paid";
+      inst.status = "paid";
+    } else {
+      inst.paymentStatus = "partial_approved";
+      inst.status = "pending";
+    }
+
+    project.calculatePaymentSummary();
+    await project.save();
+
+    // Approve the payment request
+    paymentRequest.status = "approved";
+    paymentRequest.reviewedBy = req.user?.id || null;
+    paymentRequest.reviewedAt = new Date();
+    paymentRequest.adminRemark =
+      "Approved via mark-paid by admin";
+    if (paymentMode) paymentRequest.paymentMode = paymentMode;
+    if (transactionId) paymentRequest.transactionId = transactionId;
+
+    // Create / accumulate invoice
+    let invoice = await Invoice.findOne({
+      projectId: project._id,
+      installmentId: inst._id,
+    });
+
+    const gstRate = Number(project.gstPercent || 0);
+    const gstAmt = Number(((paid * gstRate) / 100).toFixed(2));
+    const totalForPaid = Number((paid + gstAmt).toFixed(2));
+
+    if (!invoice) {
+      invoice = new Invoice({
+        projectId: project._id,
+        clientId: project.clientId,
+        installmentId: inst._id,
+        installmentTitle: inst.title,
+        sacCode: inst.sacCode || "",
+        gstPercent: gstRate,
+        amount: paid,
+        tax: gstAmt,
+        totalAmount: totalForPaid,
+        status: "paid",
+        dueDate: inst.dueDate || null,
+        paymentDate: inst.paymentDate,
+        paymentMode,
+        transactionId: String(transactionId || "").trim(),
+        paymentRequestId: paymentRequest._id,
+      });
+      await invoice.save();
+    } else {
+      invoice.amount = Number((Number(invoice.amount || 0) + paid).toFixed(2));
+      invoice.tax = Number((Number(invoice.tax || 0) + gstAmt).toFixed(2));
+      invoice.totalAmount = Number(
+        (Number(invoice.totalAmount || 0) + totalForPaid).toFixed(2),
+      );
+      invoice.status = "paid";
+      invoice.paymentDate = inst.paymentDate;
+      invoice.paymentMode = paymentMode;
+      invoice.transactionId = String(transactionId || "").trim();
+      invoice.paymentRequestId = paymentRequest._id;
+      await invoice.save();
+    }
+
+    paymentRequest.invoiceId = invoice._id;
+    paymentRequest.invoiceNumber = invoice.invoiceNumber;
+    await paymentRequest.save();
+
+    inst.invoiceNumber = invoice.invoiceNumber;
+    await project.save();
+
+    return res.json({
+      success: true,
+      message:
+        "Client payment approved. Invoice generated. Project totals updated.",
+      data: {
+        installment: {
+          _id: inst._id,
+          paymentStatus: inst.paymentStatus,
+          paidAmount: inst.paidAmount,
+          paymentDate: inst.paymentDate,
+        },
+        invoice: {
+          _id: invoice._id,
+          invoiceNumber: invoice.invoiceNumber,
+          amount: invoice.amount,
+          tax: invoice.tax,
+          totalAmount: invoice.totalAmount,
+          status: invoice.status,
+        },
+        project: {
+          projectId: project.projectId,
+          totalPaid: project.totalPaid,
+          remainingAmount: project.remainingAmount,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("markAsPaid error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ================================================================
+ * REMINDERS
+ * ================================================================ */
 exports.sendReminders = async (req, res) => {
   try {
-    console.log("🔄 Running installment reminder check (Manual)...");
-    console.log(`⏰ Time: ${new Date().toLocaleString()}`);
-
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(0, 0, 0, 0);
-
     const nextDay = new Date(tomorrow);
     nextDay.setDate(nextDay.getDate() + 1);
 
     const projects = await Project.find({
       isDeleted: false,
-      "installments.status": "pending",
-      "installments.dueDate": {
-        $gte: tomorrow,
-        $lt: nextDay,
-      },
+      "installments.paymentStatus": "unpaid",
+      "installments.dueDate": { $gte: tomorrow, $lt: nextDay },
     }).populate("clientId");
 
-    console.log(`📋 Found ${projects.length} projects with due installments`);
-
-    let totalReminders = 0;
-    const reminderDetails = [];
-
-    for (const project of projects) {
-      const dueInstallments = project.installments.filter(
+    let total = 0;
+    for (const p of projects) {
+      total += p.installments.filter(
         (i) =>
-          i.status === "pending" &&
+          i.paymentStatus !== "paid" &&
           i.dueDate &&
           new Date(i.dueDate).setHours(0, 0, 0, 0) === tomorrow.getTime(),
-      );
-
-      console.log(
-        `  📌 Project: ${project.projectName} - ${dueInstallments.length} due installments`,
-      );
-
-      for (const installment of dueInstallments) {
-        if (project.clientId && project.clientId.email) {
-          sendReminderEmail(
-            project.clientId.email,
-            project.clientId.name || "Client",
-            installment,
-            project.projectName,
-          );
-          totalReminders++;
-          reminderDetails.push({
-            projectName: project.projectName,
-            clientName: project.clientId.name,
-            clientEmail: project.clientId.email,
-            installmentTitle: installment.title,
-            amount:
-              installment.type === "percentage"
-                ? `${installment.value}%`
-                : `₹${installment.value}`,
-            dueDate: installment.dueDate,
-          });
-        } else {
-          console.log(
-            `⚠️ No email found for client: ${project.clientId?.name || "Unknown"}`,
-          );
-        }
-      }
+      ).length;
     }
-
-    console.log(
-      `✅ ${totalReminders} reminder emails sent for tomorrow's due installments.`,
-    );
-    console.log("---");
-
-    res.json({
+    return res.json({
       success: true,
-      message: `${totalReminders} reminder emails sent successfully`,
-      data: {
-        totalReminders,
-        reminders: reminderDetails,
-        runAt: new Date().toISOString(),
-      },
+      message: `${total} installments due tomorrow`,
+      data: { totalReminders: total, runAt: new Date().toISOString() },
     });
   } catch (error) {
-    console.error("❌ Error in reminder check:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Get upcoming installments (preview)
-// @route   GET /api/reminders/upcoming
 exports.getUpcomingInstallments = async (req, res) => {
   try {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(0, 0, 0, 0);
-
     const nextDay = new Date(tomorrow);
     nextDay.setDate(nextDay.getDate() + 1);
 
     const projects = await Project.find({
       isDeleted: false,
-      "installments.status": "pending",
-      "installments.dueDate": {
-        $gte: tomorrow,
-        $lt: nextDay,
-      },
+      "installments.paymentStatus": "unpaid",
+      "installments.dueDate": { $gte: tomorrow, $lt: nextDay },
     }).populate("clientId", "name email mobile");
 
     const upcoming = [];
-
-    for (const project of projects) {
-      const dueInstallments = project.installments.filter(
+    for (const p of projects) {
+      for (const i of p.installments.filter(
         (i) =>
-          i.status === "pending" &&
+          i.paymentStatus !== "paid" &&
           i.dueDate &&
           new Date(i.dueDate).setHours(0, 0, 0, 0) === tomorrow.getTime(),
-      );
-
-      for (const installment of dueInstallments) {
+      )) {
         upcoming.push({
-          projectId: project._id,
-          projectName: project.projectName,
-          clientName: project.clientId?.name || "Unknown",
-          clientEmail: project.clientId?.email || "No Email",
-          clientMobile: project.clientId?.mobile || "N/A",
-          installmentId: installment._id,
-          installmentTitle: installment.title,
-          amount:
-            installment.type === "percentage"
-              ? `${installment.value}%`
-              : `₹${installment.value}`,
-          dueDate: installment.dueDate,
-          status: installment.status,
+          projectId: p._id,
+          projectName: p.projectName,
+          clientName: p.clientId?.name || "Unknown",
+          clientEmail: p.clientId?.email || "No Email",
+          clientMobile: p.clientId?.mobile || "N/A",
+          installmentId: i._id,
+          installmentTitle: i.title,
+          value: i.value,
+          type: i.type,
+          dueDate: i.dueDate,
+          paymentStatus: i.paymentStatus,
         });
       }
     }
-
-    res.json({
+    return res.json({
       success: true,
       data: {
         total: upcoming.length,
@@ -1597,277 +1578,288 @@ exports.getUpcomingInstallments = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Error in getUpcomingInstallments:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Send test reminder for specific project
-// @route   POST /api/reminders/test/:projectId
-exports.sendTestReminder = async (req, res) => {
+exports.getTomorrowReminders = async (req, res) => {
   try {
-    const { projectId } = req.params;
-    const { installmentId } = req.body;
+    // Preserves your existing date-selection behavior.
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const project = await Project.findById(projectId).populate("clientId");
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: "Project not found",
-      });
-    }
+    const tomorrowStr = tomorrow.toISOString().split("T")[0];
 
-    let installment;
-    if (installmentId) {
-      installment = project.installments.id(installmentId);
-      if (!installment) {
-        return res.status(404).json({
-          success: false,
-          message: "Installment not found",
+    const projects = await Project.find({
+      isDeleted: false,
+    }).populate("clientId", "name email mobile address");
+
+    const reminders = [];
+
+    for (const project of projects) {
+      const totals = getProjectPaymentTotals(project);
+
+      for (const installment of project.installments || []) {
+        if (installment.paymentStatus === "paid") continue;
+        if (!installment.dueDate) continue;
+
+        const dueDate = new Date(installment.dueDate);
+
+        if (Number.isNaN(dueDate.getTime())) continue;
+
+        if (dueDate.toISOString().split("T")[0] !== tomorrowStr) {
+          continue;
+        }
+
+        reminders.push({
+          projectId: project._id,
+          projectName: project.projectName,
+          projectCost: totals.projectCost,
+
+          client: {
+            _id: project.clientId?._id,
+            name: project.clientId?.name || "Unknown",
+            email: project.clientId?.email || "No Email",
+            mobile: project.clientId?.mobile || "N/A",
+            address: project.clientId?.address || "",
+          },
+
+          installment: {
+            _id: installment._id,
+            title: installment.title,
+            type: installment.type,
+            value: installment.value,
+            dueDate: installment.dueDate,
+            paymentStatus: installment.paymentStatus,
+          },
         });
       }
-    } else {
-      // Get first pending installment
-      installment = project.installments.find((i) => i.status === "pending");
-      if (!installment) {
-        return res.status(404).json({
-          success: false,
-          message: "No pending installment found",
-        });
-      }
     }
 
-    if (!project.clientId || !project.clientId.email) {
-      return res.status(400).json({
-        success: false,
-        message: "Client has no email address",
-      });
-    }
+    const clientIds = reminders
+      .map((reminder) => reminder.client._id?.toString())
+      .filter(Boolean);
 
-    // Send test email
-    sendReminderEmail(
-      project.clientId.email,
-      project.clientId.name || "Client",
-      installment,
-      project.projectName,
-    );
-
-    res.json({
+    return res.json({
       success: true,
-      message: "Test reminder sent successfully",
       data: {
-        projectName: project.projectName,
-        clientName: project.clientId.name,
-        clientEmail: project.clientId.email,
-        installmentTitle: installment.title,
-        amount:
-          installment.type === "percentage"
-            ? `${installment.value}%`
-            : `₹${installment.value}`,
-        dueDate: installment.dueDate,
-        sentAt: new Date().toISOString(),
+        dueDate: tomorrowStr,
+        totalDueTomorrow: reminders.length,
+        totalClients: new Set(clientIds).size,
+        reminders,
       },
     });
   } catch (error) {
-    console.error("❌ Error in sendTestReminder:", error);
-    res.status(500).json({
+    console.error("Get tomorrow reminders error:", error);
+
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
-
-// @desc    Get reminder statistics
-// @route   GET /api/reminders/stats
 exports.getReminderStats = async (req, res) => {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
-
     const nextDay = new Date(tomorrow);
     nextDay.setDate(nextDay.getDate() + 1);
 
-    // Total pending installments
-    const totalPending = await Project.aggregate([
-      { $match: { isDeleted: false } },
-      { $unwind: "$installments" },
-      { $match: { "installments.status": "pending" } },
-      { $count: "total" },
-    ]);
-
-    // Due today
-    const dueToday = await Project.aggregate([
-      { $match: { isDeleted: false } },
-      { $unwind: "$installments" },
-      {
-        $match: {
-          "installments.status": "pending",
-          "installments.dueDate": {
-            $gte: today,
-            $lt: tomorrow,
+    const [tp, dt, dtm, od] = await Promise.all([
+      Project.aggregate([
+        { $match: { isDeleted: false } },
+        { $unwind: "$installments" },
+        { $match: { "installments.paymentStatus": "unpaid" } },
+        { $count: "total" },
+      ]),
+      Project.aggregate([
+        { $match: { isDeleted: false } },
+        { $unwind: "$installments" },
+        {
+          $match: {
+            "installments.paymentStatus": "unpaid",
+            "installments.dueDate": { $gte: today, $lt: tomorrow },
           },
         },
-      },
-      { $count: "total" },
-    ]);
-
-    // Due tomorrow
-    const dueTomorrow = await Project.aggregate([
-      { $match: { isDeleted: false } },
-      { $unwind: "$installments" },
-      {
-        $match: {
-          "installments.status": "pending",
-          "installments.dueDate": {
-            $gte: tomorrow,
-            $lt: nextDay,
+        { $count: "total" },
+      ]),
+      Project.aggregate([
+        { $match: { isDeleted: false } },
+        { $unwind: "$installments" },
+        {
+          $match: {
+            "installments.paymentStatus": "unpaid",
+            "installments.dueDate": { $gte: tomorrow, $lt: nextDay },
           },
         },
-      },
-      { $count: "total" },
-    ]);
-
-    // Overdue
-    const overdue = await Project.aggregate([
-      { $match: { isDeleted: false } },
-      { $unwind: "$installments" },
-      {
-        $match: {
-          "installments.status": "pending",
-          "installments.dueDate": { $lt: today },
+        { $count: "total" },
+      ]),
+      Project.aggregate([
+        { $match: { isDeleted: false } },
+        { $unwind: "$installments" },
+        {
+          $match: {
+            "installments.paymentStatus": "unpaid",
+            "installments.dueDate": { $lt: today },
+          },
         },
-      },
-      { $count: "total" },
+        { $count: "total" },
+      ]),
     ]);
-
-    res.json({
+    return res.json({
       success: true,
       data: {
-        totalPending: totalPending[0]?.total || 0,
-        dueToday: dueToday[0]?.total || 0,
-        dueTomorrow: dueTomorrow[0]?.total || 0,
-        overdue: overdue[0]?.total || 0,
+        totalPending: tp[0]?.total || 0,
+        dueToday: dt[0]?.total || 0,
+        dueTomorrow: dtm[0]?.total || 0,
+        overdue: od[0]?.total || 0,
         asOf: new Date().toISOString(),
       },
     });
   } catch (error) {
-    console.error("❌ Error in getReminderStats:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ==================== INVOICE CONTROLLERS ====================
+exports.debugReminders = async (req, res) => {
+  try {
+    const projects = await Project.find({ isDeleted: false }).populate(
+      "clientId",
+      "name email",
+    );
+    const rows = [];
+    for (const p of projects) {
+      for (const i of p.installments) {
+        rows.push({
+          projectId: p.projectId,
+          projectName: p.projectName,
+          installmentId: i._id,
+          title: i.title,
+          dueDate: i.dueDate,
+          paymentStatus: i.paymentStatus,
+          paidAmount: i.paidAmount,
+          requestedAmount: i.requestedAmount,
+          clientName: p.clientId?.name || "No Client",
+          clientEmail: p.clientId?.email || "No Email",
+        });
+      }
+    }
+    return res.json({ success: true, data: { total: rows.length, rows } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
 
+exports.sendTestReminder = async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.projectId).populate(
+      "clientId",
+    );
+    if (!project)
+      return res
+        .status(404)
+        .json({ success: false, message: "Project not found" });
+    const inst = req.body.installmentId
+      ? project.installments.id(req.body.installmentId)
+      : project.installments.find((i) => i.paymentStatus === "unpaid");
+    if (!inst)
+      return res
+        .status(404)
+        .json({ success: false, message: "Installment not found" });
+    return res.json({
+      success: true,
+      message: "Test reminder logged",
+      data: {
+        projectName: project.projectName,
+        clientEmail: project.clientId?.email || "No Email",
+        installmentTitle: inst.title,
+        paymentStatus: inst.paymentStatus,
+        sentAt: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ================================================================
+ * INVOICES
+ * ================================================================ */
 exports.getInvoices = async (req, res) => {
   try {
     const { id, projectId, clientId, status, page = 1, limit = 10 } = req.query;
 
-    // ============ GET BY ID ============
     if (id) {
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid invoice id" });
+      }
       const invoice = await Invoice.findById(id)
         .populate("clientId", "name email mobile address")
         .populate("projectId", "projectName projectId category");
-
       if (!invoice) {
-        return res.status(404).json({
-          success: false,
-          message: "Invoice not found",
-        });
+        return res
+          .status(404)
+          .json({ success: false, message: "Invoice not found" });
       }
-
-      return res.json({
-        success: true,
-        data: invoice,
-      });
+      return res.json({ success: true, data: invoice });
     }
 
-    // ============ BUILD QUERY ============
     const query = {};
-
     if (projectId) query.projectId = projectId;
     if (clientId) query.clientId = clientId;
-    if (status) query.status = status;
+    if (["generated", "sent", "paid", "overdue"].includes(status)) {
+      query.status = status;
+    }
 
-    // ============ GET ALL OR FILTERED ============
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, Number(limit) || 10));
     const total = await Invoice.countDocuments(query);
     const invoices = await Invoice.find(query)
       .populate("clientId", "name email mobile address")
       .populate("projectId", "projectName projectId category")
       .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit));
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum);
 
-    // Calculate total amount
-    const totalAmount = await Invoice.aggregate([
+    const agg = await Invoice.aggregate([
       { $match: query },
       { $group: { _id: null, total: { $sum: "$totalAmount" } } },
     ]);
 
-    // Check if no invoices found
-    if (invoices.length === 0) {
-      let message = "No invoices found";
-      if (projectId) message = "No invoices found for this project";
-      if (clientId) message = "No invoices found for this client";
-
-      return res.status(404).json({
-        success: false,
-        message: message,
-      });
-    }
-
-    // ============ RESPONSE ============
-    const response = {
+    return res.json({
       success: true,
-      data: invoices,
-      total: invoices.length,
-      totalAmount: totalAmount[0]?.total || 0,
+      count: invoices.length,
+      totalAmount: agg[0]?.total || 0,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / parseInt(limit)),
-        total: total,
+        page: pageNum,
+        limit: limitNum,
+        pages: Math.ceil(total / limitNum),
+        total,
       },
-    };
-
-    // Add filter info
-    if (projectId) response.filter = { projectId };
-    if (clientId) response.filter = { clientId };
-    if (status) response.filter = { ...response.filter, status };
-
-    res.json(response);
-  } catch (error) {
-    console.error("Get invoices error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
+      data: invoices,
     });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Get invoice statistics
-// @route   GET /api/invoices/stats
 exports.getInvoiceStats = async (req, res) => {
   try {
-    const total = await Invoice.countDocuments();
-    const sent = await Invoice.countDocuments({ status: "sent" });
-    const paid = await Invoice.countDocuments({ status: "paid" });
-    const generated = await Invoice.countDocuments({ status: "generated" });
-    const overdue = await Invoice.countDocuments({ status: "overdue" });
-
+    const [total, sent, paid, generated, overdue] = await Promise.all([
+      Invoice.countDocuments(),
+      Invoice.countDocuments({ status: "sent" }),
+      Invoice.countDocuments({ status: "paid" }),
+      Invoice.countDocuments({ status: "generated" }),
+      Invoice.countDocuments({ status: "overdue" }),
+    ]);
     const totalAmount = await Invoice.aggregate([
       { $group: { _id: null, total: { $sum: "$totalAmount" } } },
     ]);
-
-    res.json({
+    return res.json({
       success: true,
       data: {
         total,
@@ -1879,717 +1871,96 @@ exports.getInvoiceStats = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Get invoice stats error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Get tomorrow's reminders
-// @route   GET /api/projects/tomorrowreminders
-exports.getTomorrowReminders = async (req, res) => {
-  try {
-    // Get tomorrow's date as string (YYYY-MM-DD)
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split("T")[0];
-
-    console.log(`📅 Tomorrow's date: ${tomorrowStr}`);
-
-    // Find ALL projects with pending installments (not deleted)
-    const projects = await Project.find({
-      isDeleted: false,
-    }).populate("clientId", "name email mobile address");
-
-    console.log(`📋 Found ${projects.length} total active projects`);
-
-    const reminders = [];
-    let totalDueTomorrow = 0;
-
-    for (const project of projects) {
-      // Filter pending installments due tomorrow
-      const dueInstallments = project.installments.filter((i) => {
-        if (i.status !== "pending") return false;
-        if (!i.dueDate) return false;
-
-        // Compare date strings (YYYY-MM-DD)
-        const dueDateStr = new Date(i.dueDate).toISOString().split("T")[0];
-        return dueDateStr === tomorrowStr;
-      });
-
-      if (dueInstallments.length === 0) continue;
-
-      console.log(
-        `✅ Project: ${project.projectName} - ${dueInstallments.length} installments due tomorrow`,
-      );
-
-      for (const installment of dueInstallments) {
-        let amount = 0;
-        if (installment.type === "percentage") {
-          amount = (installment.value / 100) * project.projectCost;
-        } else {
-          amount = installment.value;
-        }
-
-        totalDueTomorrow++;
-        reminders.push({
-          projectId: project._id,
-          projectName: project.projectName,
-          projectCost: project.projectCost,
-          client: {
-            _id: project.clientId?._id,
-            name: project.clientId?.name || "Unknown Client",
-            email: project.clientId?.email || "No Email",
-            mobile: project.clientId?.mobile || "N/A",
-            address: project.clientId?.address || "",
-          },
-          installment: {
-            _id: installment._id,
-            title: installment.title,
-            type: installment.type,
-            value: installment.value,
-            amount: amount,
-            dueDate: installment.dueDate,
-            status: installment.status,
-          },
-        });
-      }
-    }
-
-    res.json({
-      success: true,
-      data: {
-        dueDate: tomorrowStr,
-        totalDueTomorrow: totalDueTomorrow,
-        totalClients: new Set(reminders.map((r) => r.client._id?.toString()))
-          .size,
-        reminders: reminders,
-      },
-    });
-  } catch (error) {
-    console.error("❌ Error in getTomorrowReminders:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-// @desc    DEBUG: Check all pending installments and their due dates
-// @route   GET /api/reminders/debug
-exports.debugReminders = async (req, res) => {
-  try {
-    // Get ALL projects with pending installments
-    const projects = await Project.find({
-      isDeleted: false,
-      "installments.status": "pending",
-    }).populate("clientId", "name email");
-
-    console.log(
-      `📋 Found ${projects.length} projects with pending installments`,
-    );
-
-    const result = {
-      totalProjects: projects.length,
-      totalPendingInstallments: 0,
-      installments: [],
-    };
-
-    for (const project of projects) {
-      const pendingInstallments = project.installments.filter(
-        (i) => i.status === "pending",
-      );
-
-      console.log(
-        `📌 Project: ${project.projectName} - ${pendingInstallments.length} pending installments`,
-      );
-
-      for (const installment of pendingInstallments) {
-        result.totalPendingInstallments++;
-
-        // Calculate amount
-        let amount = 0;
-        if (installment.type === "percentage") {
-          amount = (installment.value / 100) * project.projectCost;
-        } else {
-          amount = installment.value;
-        }
-
-        result.installments.push({
-          projectName: project.projectName,
-          projectId: project._id,
-          installmentId: installment._id,
-          title: installment.title,
-          type: installment.type,
-          value: installment.value,
-          amount: amount,
-          dueDate: installment.dueDate,
-          dueDateType: typeof installment.dueDate,
-          dueDateString: installment.dueDate
-            ? installment.dueDate.toString()
-            : "null",
-          status: installment.status,
-          clientName: project.clientId?.name || "No Client",
-          clientEmail: project.clientId?.email || "No Email",
-        });
-
-        console.log(
-          `   📅 Installment: ${installment.title} - Due: ${installment.dueDate}`,
-        );
-      }
-    }
-
-    // Check tomorrow's date
-    const now = new Date();
-    const tomorrow = new Date(
-      Date.UTC(
-        now.getUTCFullYear(),
-        now.getUTCMonth(),
-        now.getUTCDate() + 1,
-        0,
-        0,
-        0,
-        0,
-      ),
-    );
-
-    const tomorrowStr = tomorrow.toISOString();
-    const tomorrowDate = tomorrow.toISOString().split("T")[0];
-
-    console.log(`📅 Tomorrow (UTC): ${tomorrowStr}`);
-    console.log(`📅 Tomorrow (Date only): ${tomorrowDate}`);
-
-    // Filter installments due tomorrow
-    const dueTomorrow = result.installments.filter((i) => {
-      if (!i.dueDate) return false;
-      const dueDateStr = i.dueDate.split("T")[0]; // Get YYYY-MM-DD
-      return dueDateStr === tomorrowDate;
-    });
-
-    result.dueTomorrow = {
-      count: dueTomorrow.length,
-      installments: dueTomorrow,
-    };
-
-    res.json({
-      success: true,
-      data: {
-        debug: result,
-        tomorrow: {
-          date: tomorrowStr,
-          dateOnly: tomorrowDate,
-        },
-        query: {
-          isDeleted: false,
-          "installments.status": "pending",
-          "installments.dueDate": {
-            $gte: tomorrow,
-            $lt: new Date(
-              Date.UTC(
-                now.getUTCFullYear(),
-                now.getUTCMonth(),
-                now.getUTCDate() + 2,
-                0,
-                0,
-                0,
-                0,
-              ),
-            ),
-          },
-        },
-      },
-    });
-  } catch (error) {
-    console.error("❌ Debug error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-const mongoose = require("mongoose");
-const Invoice = require("../models/Invoice");
-const Project = require("../models/Project");
-const Client = require("../models/Client");
-
-// ADD INSTALLMENT AND AUTOMATICALLY CREATE INVOICE
-exports.addProjectInstallment = async (req, res) => {
-  try {
-    const { projectId } = req.params;
-
-    const {
-      title,
-      type = "amount",
-      value,
-      gstPercent = 0,
-      sgstPercent = 0,
-      dueDate = null,
-      paymentDate = null,
-      sacCode = "", // ADD THIS
-      status = "pending",
-      notes = "",
-    } = req.body;
-
-    // ==========================================
-    // 1. VALIDATE REQUEST
-    // ==========================================
-    if (!title || !String(title).trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Installment title is required",
-      });
-    }
-
-    if (!["amount", "percentage"].includes(type)) {
-      return res.status(400).json({
-        success: false,
-        message: "Type must be amount or percentage",
-      });
-    }
-
-    const amountValue = Number(value);
-    const gstRate = Number(gstPercent);
-    const sgstRate = Number(sgstPercent);
-
-    if (!Number.isFinite(amountValue) || amountValue <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Installment value must be greater than zero",
-      });
-    }
-
-    if (
-      !Number.isFinite(gstRate) ||
-      !Number.isFinite(sgstRate) ||
-      gstRate < 0 ||
-      gstRate > 100 ||
-      sgstRate < 0 ||
-      sgstRate > 100
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "GST and SGST must be between 0 and 100",
-      });
-    }
-
-    if (!["pending", "paid"].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Status must be pending or paid",
-      });
-    }
-
-    // ==========================================
-    // 2. FIND PROJECT
-    // Supports MongoDB ID and custom ID
-    // ==========================================
-    let project = null;
-
-    if (mongoose.Types.ObjectId.isValid(projectId)) {
-      project = await Project.findOne({
-        _id: projectId,
-        isDeleted: { $ne: true },
-      });
-    }
-
-    if (!project) {
-      project = await Project.findOne({
-        projectId,
-        isDeleted: { $ne: true },
-      });
-    }
-
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: "Project not found",
-      });
-    }
-
-    let client = null;
-
-    // 1. Find client by the linked MongoDB ObjectId
-    if (
-      project.clientId &&
-      mongoose.Types.ObjectId.isValid(String(project.clientId))
-    ) {
-      client = await Client.findById(project.clientId);
-    }
-
-    // 2. If not found, match the project's email with Client.email
-    if (!client && project.mailId) {
-      const email = String(project.mailId).trim();
-
-      client = await Client.findOne({
-        email: {
-          $regex: `^${email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
-          $options: "i",
-        },
-      });
-    }
-
-    // 3. If not found, match mobile with Client.mobile
-    if (!client && project.mobileNumber) {
-      const mobile = String(project.mobileNumber).replace(/\D/g, "");
-
-      if (mobile) {
-        const clients = await Client.find();
-
-        const matches = clients.filter(
-          (item) => String(item.mobile || "").replace(/\D/g, "") === mobile,
-        );
-
-        if (matches.length === 1) {
-          client = matches[0];
-        }
-      }
-    }
-
-    let createClientFromProject = false;
-    if (!client) {
-      const clientName = String(project.clientName || "").trim();
-      const email = String(project.mailId || "").trim();
-      const mobile = String(project.mobileNumber || "").trim();
-
-      if (clientName) {
-        const escapedName = clientName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const nameMatches = await Client.find({
-          name: { $regex: `^\\s*${escapedName}\\s*$`, $options: "i" },
-        }).limit(2);
-        if (nameMatches.length === 1) client = nameMatches[0];
-        if (nameMatches.length > 1) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Multiple clients match this project name; link the correct clientId before generating an invoice",
-          });
-        }
-      }
-
-      if (!client && clientName && (email || mobile)) {
-        createClientFromProject = true;
-      }
-    }
-
-    if (!client && !createClientFromProject) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Client not found. Add a client name and email or mobile number to the project before generating an invoice.",
-        debug: {
-          projectClientId: project.clientId || null,
-          projectEmail: project.mailId || null,
-          projectMobile: project.mobileNumber || null,
-          projectClientName: project.clientName || null,
-        },
-      });
-    }
-
-    // ==========================================
-    // 3. CHECK INSTALLMENT LIMIT
-    // ==========================================
-    if (
-      project.paymentMilestone > 0 &&
-      project.installments.length >= project.paymentMilestone
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: `Maximum ${project.paymentMilestone} installments allowed`,
-      });
-    }
-
-    // ==========================================
-    // 4. CALCULATE PRINCIPAL AMOUNT
-    // ==========================================
-    const principalAmount =
-      type === "percentage"
-        ? (amountValue / 100) * Number(project.projectCost)
-        : amountValue;
-
-    const allocatedAmount = project.installments.reduce(
-      (total, installment) => {
-        const principal =
-          installment.type === "percentage"
-            ? (Number(installment.value) / 100) * Number(project.projectCost)
-            : Number(installment.value);
-
-        return total + principal;
-      },
-      0,
-    );
-
-    if (
-      allocatedAmount + principalAmount >
-      Number(project.projectCost) + 0.01
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Installment exceeds the remaining unallocated project cost",
-        projectCost: project.projectCost,
-        allocatedAmount: Number(allocatedAmount.toFixed(2)),
-        requestedAmount: Number(principalAmount.toFixed(2)),
-        unallocatedBalance: Number(
-          (project.projectCost - allocatedAmount).toFixed(2),
-        ),
-      });
-    }
-
-    // ==========================================
-    // 5. CALCULATE TAXES
-    // ==========================================
-    const gstAmount = Number(((principalAmount * gstRate) / 100).toFixed(2));
-
-    const sgstAmount = Number(((principalAmount * sgstRate) / 100).toFixed(2));
-
-    const totalAmount = Number(
-      (principalAmount + gstAmount + sgstAmount).toFixed(2),
-    );
-
-    // Save the installment and invoice atomically, then attach the generated
-    // invoice number to the installment before the transaction commits.
-    let savedInstallment;
-    let invoice;
-    const session = await mongoose.startSession();
-    try {
-      await session.withTransaction(async () => {
-        project = await Project.findById(project._id).session(session);
-        if (!project) {
-          throw new Error("Project not found during installment save");
-        }
-        let transactionClient = null;
-        if (
-          project.clientId &&
-          mongoose.Types.ObjectId.isValid(String(project.clientId))
-        ) {
-          transactionClient = await Client.findById(project.clientId).session(
-            session,
-          );
-        }
-        if (!transactionClient && client && !createClientFromProject) {
-          transactionClient = await Client.findById(client._id).session(
-            session,
-          );
-        }
-        if (!transactionClient && createClientFromProject) {
-          const [createdClient] = await Client.create(
-            [
-              {
-                name: String(project.clientName).trim(),
-                email: String(project.mailId || "").trim(),
-                mobile: String(project.mobileNumber || "").trim(),
-              },
-            ],
-            { session },
-          );
-          transactionClient = createdClient;
-        }
-        if (transactionClient) client = transactionClient;
-        if (!client) throw new Error("A valid Client record is required");
-        project.clientId = client._id;
-
-        project.installments.push({
-          title: String(title).trim(),
-          type,
-          value: amountValue,
-          sacCode: String(sacCode || "").trim(), // ADD THIS
-          gstPercent: gstRate,
-          sgstPercent: sgstRate,
-          gstAmount,
-          sgstAmount,
-          totalAmount,
-          dueDate: dueDate || null,
-          paymentDate: status === "paid" ? paymentDate || new Date() : null,
-          status,
-          notes: String(notes || "").trim(),
-        });
-
-        savedInstallment =
-          project.installments[project.installments.length - 1];
-        project.calculatePaymentSummary();
-        await project.save({ session });
-
-        invoice = await Invoice.findOne({
-          projectId: project._id,
-          installmentId: savedInstallment._id,
-        }).session(session);
-
-        if (!invoice) {
-          invoice = new Invoice({
-            projectId: project._id,
-            clientId: client._id,
-            installmentId: savedInstallment._id,
-            installmentTitle: savedInstallment.title,
-            sacCode: savedInstallment.sacCode,
-            amount: Number(principalAmount.toFixed(2)),
-            tax: Number((gstAmount + sgstAmount).toFixed(2)),
-            totalAmount,
-            status: status === "paid" ? "paid" : "generated",
-            dueDate: savedInstallment.dueDate || null,
-            paymentDate:
-              status === "paid"
-                ? savedInstallment.paymentDate || new Date()
-                : null,
-          });
-          await invoice.save({ session });
-        } else if (!invoice.sacCode && savedInstallment.sacCode) {
-          invoice.sacCode = savedInstallment.sacCode;
-          await invoice.save({ session });
-        }
-
-        savedInstallment.invoiceNumber = invoice.invoiceNumber;
-        await project.save({ session });
-      });
-    } catch (error) {
-      throw new Error(
-        `Installment and invoice transaction failed: ${error.message}`,
-      );
-    } finally {
-      await session.endSession();
-    }
-
-    // ==========================================
-    // 11. RETURN BOTH RECORDS
-    // ==========================================
-    const totalAllocated = allocatedAmount + principalAmount;
-
-    const unallocatedBalance = Number(
-      Math.max(0, project.projectCost - totalAllocated).toFixed(2),
-    );
-
-    return res.status(201).json({
-      success: true,
-      message: "Installment and invoice saved successfully",
-      data: {
-        projectId: project.projectId,
-        installmentId: savedInstallment._id,
-        invoiceId: invoice._id,
-        invoiceNumber: invoice.invoiceNumber,
-        installment: savedInstallment,
-        invoice,
-        totalPaid: project.totalPaid,
-        remainingAmount: project.remainingAmount,
-        unallocatedBalance,
-      },
-    });
-  } catch (error) {
-    console.error("Add project installment error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Failed to add installment and create invoice",
-    });
-  }
-};
-
-// Keep the existing invoice-path mapping working while both routes share the
-// same controller implementation.
 exports.createInvoices = exports.addProjectInstallment;
 
 exports.updateInvoiceStatus = async (req, res) => {
   try {
-    const { invoiceId } = req.params;
+    const invoiceId = req.params.invoiceId || req.params.id;
     const { status, paymentMode, transactionId } = req.body;
 
-    const allowedStatuses = ["generated", "sent", "paid", "overdue"];
-
-    if (!allowedStatuses.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid invoice status",
-      });
-    }
+    if (!mongoose.Types.ObjectId.isValid(invoiceId))
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid invoice id" });
+    if (!["generated", "sent", "paid", "overdue"].includes(status))
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid invoice status" });
 
     const invoice = await Invoice.findById(invoiceId);
-
-    if (!invoice) {
-      return res.status(404).json({
-        success: false,
-        message: "Invoice not found",
-      });
-    }
+    if (!invoice)
+      return res
+        .status(404)
+        .json({ success: false, message: "Invoice not found" });
 
     invoice.status = status;
-
     if (status === "paid") {
       invoice.paymentDate = new Date();
-
-      if (paymentMode !== undefined) {
-        invoice.paymentMode = paymentMode;
-      }
-
-      if (transactionId !== undefined) {
-        invoice.transactionId = transactionId;
-      }
+      if (paymentMode !== undefined) invoice.paymentMode = paymentMode;
+      if (transactionId !== undefined) invoice.transactionId = transactionId;
     }
-
-    if (status === "sent" && !invoice.sentAt) {
-      invoice.sentAt = new Date();
-    }
-
+    if (status === "sent" && !invoice.sentAt) invoice.sentAt = new Date();
     await invoice.save();
 
-    return res.status(200).json({
+    return res.json({
       success: true,
       message: "Invoice status updated successfully",
       data: invoice,
     });
   } catch (error) {
-    console.error("Update invoice status error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update invoice status",
-      error: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
 exports.getAllInvoices = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = "", status } = req.query;
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      status,
+    } = req.query;
 
-    // =========================================
-    // 1. Pagination
-    // =========================================
-    const pageNumber = Math.max(1, Number(page) || 1);
-    const limitNumber = Math.min(Math.max(1, Number(limit) || 10), 100);
+    const parsedPage = Number(page);
+    const parsedLimit = Number(limit);
 
-    // =========================================
-    // 2. Invoice filters
-    // =========================================
+    const pageNumber = Number.isFinite(parsedPage)
+      ? Math.max(1, Math.trunc(parsedPage))
+      : 1;
+
+    const limitNumber = Number.isFinite(parsedLimit)
+      ? Math.min(100, Math.max(1, Math.trunc(parsedLimit)))
+      : 10;
+
     const filter = {};
 
     if (["generated", "sent", "paid", "overdue"].includes(status)) {
       filter.status = status;
     }
 
-    // =========================================
-    // 3. Fetch invoices with project and client
-    // =========================================
     const invoices = await Invoice.find(filter)
       .populate("projectId")
       .populate("clientId")
       .sort({ createdAt: -1 })
       .lean();
 
-    // =========================================
-    // 4. Search invoices
-    // =========================================
-    const searchText = String(search || "")
-      .trim()
-      .toLowerCase();
+    const searchText = String(search || "").trim().toLowerCase();
 
-    const filteredInvoices = searchText
+    const filtered = searchText
       ? invoices.filter((invoice) => {
           const project =
-            invoice.projectId && typeof invoice.projectId === "object"
+            invoice.projectId &&
+            typeof invoice.projectId === "object"
               ? invoice.projectId
               : {};
 
           const client =
-            invoice.clientId && typeof invoice.clientId === "object"
+            invoice.clientId &&
+            typeof invoice.clientId === "object"
               ? invoice.clientId
               : {};
 
@@ -2599,21 +1970,15 @@ exports.getAllInvoices = async (req, res) => {
             project.projectId,
             project.projectName,
             client.name,
-            client.clientName,
             client.email,
             client.mobile,
           ].some((value) =>
-            String(value || "")
-              .toLowerCase()
-              .includes(searchText),
+            String(value || "").toLowerCase().includes(searchText)
           );
         })
       : invoices;
 
-    // =========================================
-    // 5. Add project, client and installment data
-    // =========================================
-    const enrichedInvoices = filteredInvoices.map((invoice) => {
+    const enriched = filtered.map((invoice) => {
       const project =
         invoice.projectId && typeof invoice.projectId === "object"
           ? invoice.projectId
@@ -2624,45 +1989,52 @@ exports.getAllInvoices = async (req, res) => {
           ? invoice.clientId
           : null;
 
-      // Find the exact installment linked to this invoice
       const installment = Array.isArray(project?.installments)
         ? project.installments.find(
-            (item) => String(item._id) === String(invoice.installmentId),
+            (item) =>
+              String(item._id) === String(invoice.installmentId)
           )
         : null;
 
+      const totals = project
+        ? getProjectPaymentTotals(project)
+        : {
+            projectCost: 0,
+            totalPaid: 0,
+            remainingAmount: 0,
+          };
+
       const installmentAmount = Number(invoice.amount || 0);
 
-      // GST and SGST values are stored on the project installment
-      const gstAmount = Number(installment?.gstAmount ?? 0);
-
-      const sgstAmount = Number(installment?.sgstAmount ?? 0);
-
-      const projectCost = Number(project?.projectCost ?? 0);
-
-      const totalPaid = Number(project?.totalPaid ?? 0);
-
-      const remainingCost = Number(
-        project?.remainingAmount ?? Math.max(projectCost - totalPaid, 0),
+      const gstAmount = Number(
+        installment?.gstAmount ?? invoice.tax ?? 0
       );
+
+      // Convert the populated project's display values as well.
+      const displayedProject = project
+        ? {
+            ...project,
+            projectCost: totals.projectCost,
+            totalPaid: totals.totalPaid,
+            remainingAmount: totals.remainingAmount,
+          }
+        : invoice.projectId;
 
       return {
         ...invoice,
+        projectId: displayedProject,
 
-        // Project details
         projectName: project?.projectName || "",
         projectCode: project?.projectId || "",
-        projectCost,
-        totalPaid,
-        remainingCost,
+        projectCost: totals.projectCost,
+        totalPaid: totals.totalPaid,
+        remainingCost: totals.remainingAmount,
 
-        // Client details
         clientName: client?.name || project?.clientName || "",
         clientMobile: client?.mobile || project?.mobileNumber || "",
         clientEmail: client?.email || project?.mailId || "",
         clientAddress: client?.address || "",
 
-        // Installment details
         installmentId: invoice.installmentId,
         installmentTitle:
           invoice.installmentTitle ||
@@ -2671,50 +2043,36 @@ exports.getAllInvoices = async (req, res) => {
 
         installmentCost: installmentAmount,
         subtotal: installmentAmount,
-
-        // Tax breakdown
-        gstPercent: Number(installment?.gstPercent ?? 0),
-        sgstPercent: Number(installment?.sgstPercent ?? 0),
+        gstPercent: Number(
+          invoice.gstPercent ?? project?.gstPercent ?? 0
+        ),
         gstAmount,
-        sgstAmount,
-
-        // Notes
         notes: installment?.notes || "",
 
-        // Invoice total
         totalAmount: Number(
-          invoice.totalAmount ?? installmentAmount + gstAmount + sgstAmount,
+          invoice.totalAmount ?? installmentAmount + gstAmount
         ),
       };
     });
 
-    // =========================================
-    // 6. Pagination after search
-    // =========================================
-    const total = enrichedInvoices.length;
-
+    const total = enriched.length;
     const startIndex = (pageNumber - 1) * limitNumber;
 
-    const paginatedInvoices = enrichedInvoices.slice(
+    const paginated = enriched.slice(
       startIndex,
-      startIndex + limitNumber,
+      startIndex + limitNumber
     );
 
-    // =========================================
-    // 7. Response
-    // =========================================
     return res.status(200).json({
       success: true,
       message: "Invoices fetched successfully",
-
       pagination: {
         total,
         page: pageNumber,
         limit: limitNumber,
         totalPages: Math.ceil(total / limitNumber),
       },
-
-      data: paginatedInvoices,
+      data: paginated,
     });
   } catch (error) {
     console.error("Get all invoices error:", error);

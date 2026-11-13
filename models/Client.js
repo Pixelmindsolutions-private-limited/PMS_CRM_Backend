@@ -11,6 +11,7 @@ const clientSchema = new mongoose.Schema(
         "Static Website",
         "Digital Marketing",
         "Web Application",
+        "Mobile Application",
         "Maintenance",
         "Other",
       ],

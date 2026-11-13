@@ -28,14 +28,15 @@ const invoiceSchema = new mongoose.Schema(
       required: true,
     },
     installmentTitle: { type: String, required: true },
-    amount: { type: Number, required: true },
-    tax: { type: Number, default: 0 },
-    sacCode: {
-      type: String,
-      trim: true,
-      default: "",
-    },
-    totalAmount: { type: Number, required: true },
+
+    // Snapshot of GST % at invoice creation
+    gstPercent: { type: Number, default: 0 },
+
+    amount: { type: Number, required: true }, // principal
+    tax: { type: Number, default: 0 }, // GST amount
+    sacCode: { type: String, trim: true, default: "" },
+    totalAmount: { type: Number, required: true }, // principal + tax
+
     status: {
       type: String,
       enum: ["generated", "sent", "paid", "overdue"],
@@ -45,52 +46,40 @@ const invoiceSchema = new mongoose.Schema(
     paymentDate: { type: Date },
     paymentMode: { type: String },
     transactionId: { type: String },
-    invoicePdf: {
-      type: String,
-      default: "",
-    },
-    invoicePdfURL: {
-      type: String,
-      default: "",
-    },
+    invoicePdf: { type: String, default: "" },
+    invoicePdfURL: { type: String, default: "" },
     sentAt: { type: Date },
+
+    paymentRequestId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PaymentRequest",
+      default: null,
+    },
   },
   { timestamps: true },
 );
 
-// ✅ FIXED: Generate invoice number with proper sequence
 invoiceSchema.pre("save", async function (next) {
   try {
     if (!this.invoiceNumber || this.invoiceNumber.startsWith("TEMP")) {
       const Invoice = mongoose.model("Invoice");
-
-      // Get current year
       const year = new Date().getFullYear();
-
-      // Find the highest invoice number for this year
       const lastInvoice = await Invoice.findOne({
         invoiceNumber: { $regex: `^PMSINV${year}` },
       }).sort({ invoiceNumber: -1 });
 
       let sequence = 1;
       if (lastInvoice) {
-        // Extract sequence number from last invoice
         const lastSeq = parseInt(
-          lastInvoice.invoiceNumber.replace(`PMSINV${year}`, ""),
+          String(lastInvoice.invoiceNumber).replace(`PMSINV${year}`, ""),
+          10,
         );
-        sequence = lastSeq + 1;
+        if (Number.isFinite(lastSeq)) sequence = lastSeq + 1;
       }
-
-      // Format: PMSINV20260005
-      const seqStr = String(sequence).padStart(4, "0");
-      this.invoiceNumber = `PMSINV${year}${seqStr}`;
-
-      console.log(`✅ Generated invoice number: ${this.invoiceNumber}`);
+      this.invoiceNumber = `PMSINV${year}${String(sequence).padStart(4, "0")}`;
     }
     next();
   } catch (error) {
-    console.error("❌ Error generating invoice number:", error);
-    // Fallback with timestamp
     const year = new Date().getFullYear();
     const timestamp = Date.now().toString().slice(-6);
     this.invoiceNumber = `PMSINV${year}${timestamp}`;
@@ -98,5 +87,6 @@ invoiceSchema.pre("save", async function (next) {
   }
 });
 
-const Invoice = mongoose.model("Invoice", invoiceSchema);
+const Invoice =
+  mongoose.models.Invoice || mongoose.model("Invoice", invoiceSchema);
 module.exports = Invoice;

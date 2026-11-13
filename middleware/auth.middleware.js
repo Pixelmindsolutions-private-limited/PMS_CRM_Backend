@@ -33,40 +33,38 @@
 // };
 
 
-
 const jwt = require('jsonwebtoken');
 const { Staff } = require('../models/Staff');
 const Admin = require('../models/Admin');
 
-// Protect routes - works for both Admin and Staff
 const protect = async (req, res, next) => {
   try {
     let token;
-    
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+
+    if (
+      req.headers.authorization &&
+      req.headers.authorization.startsWith('Bearer')
+    ) {
       token = req.headers.authorization.split(' ')[1]?.trim();
     }
-    
+
     if (!token) {
       return res.status(401).json({
         success: false,
-        message: 'Not authorized, no token'
+        message: 'Not authorized, no token',
       });
     }
-    
-    // Verify token
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'mysecretkey');
     const userId = decoded.id || decoded.adminId;
     const userType = decoded.type || (decoded.adminId ? 'admin' : undefined);
 
-    // Check user type and fetch appropriate user
     if (userType === 'staff') {
       const staff = await Staff.findById(userId).select('-password');
       if (!staff) {
-        return res.status(401).json({
-          success: false,
-          message: 'Staff not found'
-        });
+        return res
+          .status(401)
+          .json({ success: false, message: 'Staff not found' });
       }
       req.user = {
         id: staff._id,
@@ -74,57 +72,50 @@ const protect = async (req, res, next) => {
         name: staff.employeeName,
         email: staff.email,
         role: staff.role,
-        type: 'staff'
+        type: 'staff',
       };
     } else if (userType === 'admin') {
       const admin = await Admin.findById(userId).select('-password');
       if (!admin) {
-        return res.status(401).json({
-          success: false,
-          message: 'Admin not found'
-        });
+        return res
+          .status(401)
+          .json({ success: false, message: 'Admin not found' });
       }
       req.user = {
         id: admin._id,
         email: admin.email,
         name: admin.name,
-        type: 'admin'
+        type: 'admin',
       };
     } else {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid user type'
-      });
+      return res
+        .status(401)
+        .json({ success: false, message: 'Invalid user type' });
     }
-    
+
     next();
   } catch (error) {
     console.error('Auth error:', error);
-    return res.status(401).json({
-      success: false,
-      message: 'Not authorized, token failed'
-    });
+    return res
+      .status(401)
+      .json({ success: false, message: 'Not authorized, token failed' });
   }
 };
 
-// Staff only middleware
 const staffOnly = (req, res, next) => {
   if (req.user.type !== 'staff') {
-    return res.status(403).json({
-      success: false,
-      message: 'Access denied. Staff only.'
-    });
+    return res
+      .status(403)
+      .json({ success: false, message: 'Access denied. Staff only.' });
   }
   next();
 };
 
-// Admin only middleware
 const adminOnly = (req, res, next) => {
   if (req.user.type !== 'admin') {
-    return res.status(403).json({
-      success: false,
-      message: 'Access denied. Admin only.'
-    });
+    return res
+      .status(403)
+      .json({ success: false, message: 'Access denied. Admin only.' });
   }
   next();
 };

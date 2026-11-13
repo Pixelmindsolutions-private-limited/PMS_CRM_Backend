@@ -35,6 +35,18 @@ const attendanceSchema = new mongoose.Schema({
              (this.dayType === 'halfDay' || this.dayType === 'extraHours');
     }
   },
+    // NEW: track approved delay converted to working time
+  approvedDelaySeconds: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  // NEW: track rejected delay counted as delay/loss time
+  rejectedDelaySeconds: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   createdAt: {
     type: Date,
     default: Date.now

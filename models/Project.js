@@ -1,246 +1,27 @@
-// const mongoose = require('mongoose');
-
-// // Timeline schema for app/website development
-// const timelineSchema = new mongoose.Schema({
-//   designing: { type: String, default: '' },
-//   frontend: { type: String, default: '' },
-//   backend: { type: String, default: '' },
-//   deployment: { type: String, default: '' }
-// }, { _id: false });
-
-// // Marketing service schema
-// const marketingServiceSchema = new mongoose.Schema({
-//   enabled: { type: Boolean, default: false },
-//   duration: { type: String, default: '' },
-//   quantity: { type: Number, default: 0 },
-//   startDate: { type: Date, default: null }
-// }, { _id: false });
-
-// // Marketing schema
-// const marketingSchema = new mongoose.Schema({
-//   reels: { type: marketingServiceSchema, default: () => ({}) },
-//   posters: { type: marketingServiceSchema, default: () => ({}) },
-//   seo: { type: Boolean, default: false },
-//   keywords: { type: Boolean, default: false },
-//   banners: { type: Boolean, default: false }
-// }, { _id: false });
-
-// // App/Website details schema
-// const appDetailsSchema = new mongoose.Schema({
-//   appId: { type: String, default: '' },
-//   appName: { type: String, default: '' },
-//   timeline: { type: timelineSchema, default: () => ({}) }
-// }, { _id: false });
-
-// // Budget installment schema
-// const budgetInstallmentSchema = new mongoose.Schema({
-//   title: { type: String, required: true },
-//   amount: { type: Number, required: true },
-//   deadline: { type: Date, default: null }
-// }, { _id: false });
-
-// // Milestone payment schema
-// const milestonePaymentSchema = new mongoose.Schema({
-//   description: { type: String, default: '' },
-//   amount: { type: Number, required: true },
-//   paid: { type: Boolean, default: false },
-//   paymentMode: { type: String, enum: ['cash', 'bank transfer', 'upi', 'cheque'], default: 'cash' },
-//   paymentDate: { type: Date, default: null }
-// }, { _id: true });
-
-// // Team members schema
-// const teamMembersSchema = new mongoose.Schema({
-//   frontend: [{ type: String }],
-//   backend: [{ type: String }],
-//   designer: [{ type: String }],
-//   tester: [{ type: String }],
-//   manager: [{ type: String }]
-// }, { _id: false });
-
-// // Main Project Schema
-// const projectSchema = new mongoose.Schema({
-//   projectId: { type: String, unique: true, trim: true },
-//   projectName: { type: String, unique: true, required: true, trim: true },
-//   clientName: { type: String, required: true, trim: true },
-//   clientMobile: { type: String, trim: true },
-//   clientEmail: { type: String, unique: true, trim: true, lowercase: true },
-//   clientAddress: { type: String, default: '' },
-//   category: {
-//     type: String,
-//     enum: ['website', 'mobile app', 'software', 'digital market'],
-//     default: 'website'
-//   },
-//   startDate: { type: Date, default: null },
-//   projectHandoverDate: { type: Date, default: null },
-//   deadlineDate: { type: Date, default: null },
-//   duration: { type: String, default: '' },
-//   projectCost: { type: Number, default: 0 },
-//   milestone: { type: Number, default: 0 },
-//   status: {
-//     type: String,
-//     enum: ['active', 'on hold', 'completed', 'cancelled'],
-//     default: 'active'
-//   },
-//   appDetails: { type: appDetailsSchema, default: () => ({}) },
-//   marketing: { type: marketingSchema, default: () => ({}) },
-//   budgetInstallments: [budgetInstallmentSchema],
-//   milestonePayments: [milestonePaymentSchema],
-//   teamMembers: { type: teamMembersSchema, default: () => ({}) }
-// }, { timestamps: true });
-
-// projectSchema.pre('save', async function(next) {
-//   // Only generate if projectId is not already set
-//   if (!this.projectId || this.projectId === '') {
-//     try {
-//       const Project = mongoose.model('Project');
-//       const count = await Project.countDocuments();
-//       const year = new Date().getFullYear().toString().slice(-2);
-//       const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
-//       const sequence = String(count + 1).padStart(4, '0');
-//       this.projectId = `PRJ${year}${month}${sequence}`;
-//       console.log(`✅ Auto-generated projectId: ${this.projectId}`);
-//     } catch (error) {
-//       console.error('Error generating projectId:', error);
-//       // Fallback to timestamp-based ID
-//       this.projectId = `PRJ${Date.now()}`;
-//     }
-//   }
-//   next();
-// });
-
-// const Project = mongoose.models.Project || mongoose.model('Project', projectSchema);
-
-// module.exports = Project;
-
-// // models/Project.js
-// const mongoose = require('mongoose');
-
-// // Team member schema (for objects)
-// const teamMemberSchema = new mongoose.Schema({
-//     employeeId: { type: String, required: true },
-//     name: { type: String, required: true },
-//     role: { type: String, required: true }
-// }, { _id: false });
-
-// // Work division schema
-// const workDivisionSchema = new mongoose.Schema({
-//     designing: { type: Number, default: 0 },
-//     frontend: { type: Number, default: 0 },
-//     backend: { type: Number, default: 0 },
-//     testing: { type: Number, default: 0 },
-//     deployment: { type: Number, default: 0 }
-// }, { _id: false });
-
-// const projectSchema = new mongoose.Schema({
-//     clientId: {
-//         type: mongoose.Schema.Types.ObjectId,
-//         ref: 'Client',
-//         required: true
-//     },
-//     projectName: { type: String, required: true },
-//     projectCost: { type: Number, default: 0 },
-//     projectStartDate: Date,
-//     projectEndDate: Date,
-//     deadline: Date,
-//     paymentMilestone: { type: Number, default: 0 },
-//     category: {
-//         type: String,
-//         enum: ['mobile app', 'website', 'software', 'digital marketing'],
-//         default: 'website'
-//     },
-//     workDivision: {
-//         type: workDivisionSchema,
-//         default: () => ({})
-//     },
-//     teamAssignment: {
-//         designing: [teamMemberSchema],
-//         frontend: [teamMemberSchema],
-//         backend: [teamMemberSchema],
-//         testing: [teamMemberSchema],
-//         deployment: [teamMemberSchema]
-//     }
-// }, { timestamps: true });
-
-// const Project = mongoose.model('Project', projectSchema);
-
-// module.exports = Project;
-
 // models/Project.js
 const mongoose = require("mongoose");
 
-// ============ INSTALLMENT SCHEMA ============
+/* ============================================================
+ * INSTALLMENT SUB-SCHEMA (GST only — inherited from project)
+ * ============================================================ */
 const installmentSchema = new mongoose.Schema(
   {
-    title: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    // Existing field, kept for backward compatibility
+    title: { type: String, required: true, trim: true },
     type: {
       type: String,
       enum: ["amount", "percentage"],
       required: true,
+      default: "amount",
     },
+    value: { type: Number, required: true, min: 0 },
+    sacCode: { type: String, default: "", trim: true },
 
-    // Installment principal, excluding taxes
-    value: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
-    // SAC/service accounting code used on the invoice
-    sacCode: {
-      type: String,
-      default: "",
-      trim: true,
-    },
+    // Computed tax amounts (derived from project-level GST %)
+    gstAmount: { type: Number, default: 0, min: 0 },
+    totalAmount: { type: Number, default: 0, min: 0 },
 
-    // Optional taxes, default to 0%
-    gstPercent: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 100,
-    },
-
-    sgstPercent: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 100,
-    },
-
-    // Calculated tax amounts
-    gstAmount: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-
-    sgstAmount: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-
-    // Principal + GST + SGST
-    totalAmount: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-
-    dueDate: {
-      type: Date,
-      default: null,
-    },
-
-    paymentDate: {
-      type: Date,
-      default: null,
-    },
+    dueDate: { type: Date, default: null },
+    paymentDate: { type: Date, default: null },
 
     status: {
       type: String,
@@ -248,27 +29,31 @@ const installmentSchema = new mongoose.Schema(
       default: "pending",
     },
 
-    invoiceNumber: {
+    /* Payment tracking */
+    paymentStatus: {
       type: String,
-      default: "",
-      trim: true,
+      enum: ["unpaid", "pending_approval", "partial_approved", "paid"],
+      default: "unpaid",
+      index: true,
+    },
+    paidAmount: { type: Number, default: 0, min: 0 },
+    requestedAmount: { type: Number, default: 0, min: 0 },
+    pendingRequestId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PaymentRequest",
+      default: null,
     },
 
-    invoicePdfUrl: {
-      type: String,
-      default: "",
-    },
-
-    notes: {
-      type: String,
-      default: "",
-      trim: true,
-    },
+    invoiceNumber: { type: String, default: "", trim: true },
+    invoicePdfUrl: { type: String, default: "" },
+    notes: { type: String, default: "", trim: true },
   },
   { timestamps: true },
 );
 
-// Team member schema
+/* ============================================================
+ * SUPPORTING SUB-SCHEMAS
+ * ============================================================ */
 const teamMemberSchema = new mongoose.Schema(
   {
     employeeId: { type: String, required: true },
@@ -278,7 +63,6 @@ const teamMemberSchema = new mongoose.Schema(
   { _id: false },
 );
 
-// Work division schema
 const workDivisionSchema = new mongoose.Schema(
   {
     designing: { type: Number, default: 0 },
@@ -298,58 +82,46 @@ const digitalMarketingSchema = new mongoose.Schema(
       ref: "DigitalMarketingPlan",
       default: null,
     },
-    planName: {
-      type: String,
-      default: "",
-    },
-    duration: {
-      type: String,
-      default: "",
-    },
-    price: {
-      type: Number,
-      default: 0,
-    },
-    features: {
-      type: [String],
-      default: [],
-    },
+    planName: { type: String, default: "" },
+    duration: { type: String, default: "" },
+    price: { type: Number, default: 0 },
+    features: { type: [String], default: [] },
   },
   { _id: false },
 );
 
+/* ============================================================
+ * PROJECT SCHEMA
+ * ============================================================ */
 const projectSchema = new mongoose.Schema(
   {
-    projectId: {
-      type: String,
-      unique: true,
-    },
+    projectId: { type: String, unique: true },
     clientId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Client",
       required: false,
     },
 
-    // ✅ SNAPSHOT FIELDS — client info at project creation time
     clientName: { type: String, default: "" },
     mobileNumber: { type: String, default: "" },
     mailId: { type: String, default: "" },
 
     projectName: { type: String, required: true },
-    projectCost: { type: Number, default: 0 },
+    projectCost: { type: Number, default: 0, min: 0 },
+
+    /* GST config — set once at project creation */
+    gstPercent: { type: Number, default: 9, min: 0, max: 100 },
+
     projectStartDate: Date,
     projectEndDate: Date,
     deadline: Date,
-    paymentMilestone: { type: Number, default: 0 },
+    paymentMilestone: { type: Number, default: 0, min: 0 },
     category: {
       type: String,
       enum: ["mobile app", "website", "software", "digital marketing"],
       default: "website",
     },
-    workDivision: {
-      type: workDivisionSchema,
-      default: () => ({}),
-    },
+    workDivision: { type: workDivisionSchema, default: () => ({}) },
     teamAssignment: {
       designing: { type: [teamMemberSchema], default: [] },
       frontend: { type: [teamMemberSchema], default: [] },
@@ -358,23 +130,11 @@ const projectSchema = new mongoose.Schema(
       deployment: { type: [teamMemberSchema], default: [] },
       marketing: { type: [teamMemberSchema], default: [] },
     },
-    digitalMarketing: {
-      type: digitalMarketingSchema,
-      default: null,
-    },
-    // ============ INSTALLMENTS ============
-    installments: {
-      type: [installmentSchema],
-      default: [],
-    },
-    totalPaid: {
-      type: Number,
-      default: 0,
-    },
-    remainingAmount: {
-      type: Number,
-      default: 0,
-    },
+    digitalMarketing: { type: digitalMarketingSchema, default: null },
+
+    installments: { type: [installmentSchema], default: [] },
+    totalPaid: { type: Number, default: 0, min: 0 },
+    remainingAmount: { type: Number, default: 0, min: 0 },
 
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null },
@@ -382,50 +142,50 @@ const projectSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-// Generate sequential project ID (PMSPRJ0001, PMSPRJ0002, ...)
+/* ============================================================
+ * STATICS
+ * ============================================================ */
 projectSchema.statics.generateProjectId = async function () {
-  try {
-    const lastProject = await this.findOne({
-      projectId: { $regex: /^PMSPRJ/ },
-    }).sort({ projectId: -1 });
-
-    let sequence = 1;
-    if (lastProject) {
-      const lastSeq = parseInt(lastProject.projectId.replace("PMSPRJ", ""));
-      sequence = lastSeq + 1;
-    }
-
-    const seqStr = String(sequence).padStart(4, "0");
-    const projectId = `PMSPRJ${seqStr}`;
-
-    console.log(`✅ Generated projectId: ${projectId} (Sequence: ${sequence})`);
-
-    return projectId;
-  } catch (error) {
-    throw new Error(`Failed to generate project ID: ${error.message}`);
+  const last = await this.findOne({ projectId: { $regex: /^PMSPRJ/ } }).sort({
+    projectId: -1,
+  });
+  let seq = 1;
+  if (last) {
+    const parsed = parseInt(String(last.projectId).replace("PMSPRJ", ""), 10);
+    if (Number.isFinite(parsed)) seq = parsed + 1;
   }
+  return `PMSPRJ${String(seq).padStart(4, "0")}`;
 };
 
-// ============ INSTANCE METHODS ============
+/* ============================================================
+ * INSTANCE METHODS
+ * ============================================================ */
 
-// Calculate payment summary
+/**
+ * Recalculate project totals from installments.
+ * Sum of paidAmount across installments = totalPaid.
+ * remainingAmount = projectCost - totalPaid
+ */
 projectSchema.methods.calculatePaymentSummary = function () {
-  let totalPaid = 0;
+  const baseCost = Number(this.projectCost || 0);
+  const gstPercent = Number(this.gstPercent || 0);
 
-  this.installments.forEach((installment) => {
-    if (installment.status === "paid") {
-      let amount = 0;
-      if (installment.type === "percentage") {
-        amount = (installment.value / 100) * this.projectCost;
-      } else {
-        amount = installment.value;
-      }
-      totalPaid += amount;
-    }
-  });
+  const gstAmount = Number(
+    ((baseCost * gstPercent) / 100).toFixed(2)
+  );
 
-  this.totalPaid = totalPaid;
-  this.remainingAmount = this.projectCost - totalPaid;
+  const totalCost = Number((baseCost + gstAmount).toFixed(2));
+
+  const paid = this.installments.reduce(
+    (sum, installment) => sum + Number(installment.paidAmount || 0),
+    0
+  );
+
+  this.totalPaid = Number(paid.toFixed(2));
+
+  this.remainingAmount = Number(
+    Math.max(0, totalCost - this.totalPaid).toFixed(2)
+  );
 
   return {
     totalPaid: this.totalPaid,
@@ -433,9 +193,29 @@ projectSchema.methods.calculatePaymentSummary = function () {
   };
 };
 
-// Validate installments count against milestones
+/**
+ * Total principal allocated to installments (excludes taxes).
+ */
+projectSchema.methods.getAllocatedAmount = function () {
+  let allocated = 0;
+  for (const inst of this.installments) {
+    const principal =
+      inst.type === "percentage"
+        ? (Number(inst.value) / 100) * Number(this.projectCost || 0)
+        : Number(inst.value);
+    allocated += principal;
+  }
+  return Number(allocated.toFixed(2));
+};
+
+/**
+ * Guard against too many installments.
+ */
 projectSchema.methods.validateInstallments = function () {
-  if (this.installments.length > this.paymentMilestone) {
+  if (
+    this.paymentMilestone > 0 &&
+    this.installments.length > this.paymentMilestone
+  ) {
     throw new Error(
       `Cannot have more than ${this.paymentMilestone} installments`,
     );
@@ -443,27 +223,36 @@ projectSchema.methods.validateInstallments = function () {
   return true;
 };
 
-// ============ PRE-SAVE HOOK ============
+/**
+ * Recompute GST + total for one installment using project-level GST %.
+ */
+projectSchema.methods.recalcInstallmentTax = function (inst) {
+  const principal =
+    inst.type === "percentage"
+      ? (Number(inst.value) / 100) * Number(this.projectCost || 0)
+      : Number(inst.value);
+  const gst = (principal * Number(this.gstPercent || 0)) / 100;
+  inst.gstAmount = Number(gst.toFixed(2));
+  inst.totalAmount = Number((principal + gst).toFixed(2));
+  return principal;
+};
 
+/* ============================================================
+ * PRE-SAVE HOOK
+ * ============================================================ */
 projectSchema.pre("save", async function (next) {
   try {
-    // Generate project ID
     if (!this.projectId) {
       this.projectId = await this.constructor.generateProjectId();
     }
-
-    // Calculate payment summary
     this.calculatePaymentSummary();
-
-    // Validate installments count
     this.validateInstallments();
-
     next();
-  } catch (error) {
-    next(error);
+  } catch (err) {
+    next(err);
   }
 });
 
-const Project = mongoose.model("Project", projectSchema);
-
+const Project =
+  mongoose.models.Project || mongoose.model("Project", projectSchema);
 module.exports = Project;
