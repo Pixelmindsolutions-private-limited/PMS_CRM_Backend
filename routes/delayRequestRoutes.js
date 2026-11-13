@@ -1,3 +1,4 @@
+// routes/delayRequestRoutes.js   (mounted at /api/work-session)
 const express = require('express');
 const router = express.Router();
 
@@ -6,11 +7,10 @@ const auth = require('../middleware/auth.middleware');
 const protect =
   auth.protect ||
   auth.authenticate ||
-  ((req, res, next) => {
-    return res
+  ((req, res) =>
+    res
       .status(401)
-      .json({ success: false, message: 'Auth middleware missing protect()' });
-  });
+      .json({ success: false, message: 'Auth middleware missing protect()' }));
 
 const staffOnly =
   auth.staffOnly ||
@@ -35,15 +35,28 @@ const adminOnly =
   });
 
 const {
-  createDelayRequest,
-  reviewDelayRequest,
-  getDelayRequests,
+  createDelayRequests,
+  getSessionDelayRequests,
   getMyDelayRequests,
+  getDelayRequests,
+  getDelayRequestById,
+  updateDelayRequest,
+  deleteDelayRequest,
+  reviewDelayRequest,
+  reviewManyDelayRequests,
 } = require('../controllers/delayRequestController');
 
-router.post('/delay-request', protect, staffOnly, createDelayRequest);
-router.patch('/delay-request/:id/review', protect, adminOnly, reviewDelayRequest);
+// fixed paths first, "/:id" routes last
+router.post('/delay-request', protect, staffOnly, createDelayRequests);
 router.get('/delay-request', protect, adminOnly, getDelayRequests);
+
+router.patch('/delay-request/review-many', protect, adminOnly, reviewManyDelayRequests);
 router.get('/delay-request/my/:employeeId', protect, getMyDelayRequests);
+router.get('/delay-request/session/:sessionId', protect, getSessionDelayRequests);
+
+router.get('/delay-request/:id', protect, getDelayRequestById);
+router.put('/delay-request/:id', protect, staffOnly, updateDelayRequest);
+router.delete('/delay-request/:id', protect, deleteDelayRequest);
+router.patch('/delay-request/:id/review', protect, adminOnly, reviewDelayRequest);
 
 module.exports = router;
