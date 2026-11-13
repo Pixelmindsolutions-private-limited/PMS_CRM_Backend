@@ -1,6 +1,5 @@
 // middleware/chatUpload.js
-// Uploads for chat: images, videos, audio, documents, any file, stickers.
-// Field name: "files" (up to 10 files, 500 MB each)
+// Multipart field name: "files"  (max 10 files, 500 MB each)
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -9,10 +8,9 @@ const crypto = require("crypto");
 const BASE_URL =
   process.env.BASE_URL || "https://pmsbackend.pixelmindsolutions.com";
 
-const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
+const MAX_FILE_SIZE = 500 * 1024 * 1024;
 const MAX_FILES = 10;
 const CHAT_UPLOAD_ROOT = path.join(__dirname, "../uploads/chat");
-
 const BLOCKED = /\.(exe|bat|cmd|com|msi|scr|sh|php|jar|vbs|ps1)$/i;
 
 const storage = multer.diskStorage({
@@ -42,7 +40,6 @@ const upload = multer({
   },
 });
 
-// Express middleware that returns clean JSON errors
 const uploadChatFiles = (req, res, next) => {
   upload.array("files", MAX_FILES)(req, res, (err) => {
     if (!err) return next();
@@ -54,36 +51,19 @@ const uploadChatFiles = (req, res, next) => {
   });
 };
 
-function kindFromMime(mime = "", name = "") {
-  if (mime.startsWith("image/")) return "image";
-  if (mime.startsWith("video/")) return "video";
-  if (mime.startsWith("audio/")) return "audio";
-  if (
-    /pdf|msword|officedocument|ms-excel|ms-powerpoint|text\/|opendocument/.test(
-      mime
-    ) ||
-    /\.(pdf|docx?|xlsx?|pptx?|txt|csv|rtf)$/i.test(name)
-  ) {
-    return "document";
-  }
-  return "file";
-}
-
-// multer files -> attachment objects saved in DB
+// multer files → attachments saved in DB
 function buildAttachments(files = []) {
   return files.map((f) => {
     const rel = path
       .relative(CHAT_UPLOAD_ROOT, f.path)
       .split(path.sep)
       .join("/");
-    // multer reads names as latin1; restore UTF-8 (Hindi/Telugu/emoji names)
-    const fileName = Buffer.from(f.originalname, "latin1").toString("utf8");
     return {
-      url: `${BASE_URL}/uploads/chat/${rel}`,
-      fileName,
+      url: `/uploads/chat/${rel}`, // relative path; base URL is added per request
+      // multer decodes names as latin1; restore UTF-8
+      fileName: Buffer.from(f.originalname, "latin1").toString("utf8"),
       mimeType: f.mimetype,
       size: f.size,
-      kind: kindFromMime(f.mimetype, fileName),
     };
   });
 }
@@ -98,24 +78,31 @@ function removeUploadedFiles(files = []) {
   }
 }
 
-// attachment.url -> absolute disk path (for deleting)
-function attachmentToDiskPath(url = "") {
-  const prefix = `${BASE_URL}/uploads/chat/`;
-  if (!url.startsWith(prefix)) return null;
-  const rel = url.slice(prefix.length);
-  const full = path.join(CHAT_UPLOAD_ROOT, rel);
-  return full.startsWith(CHAT_UPLOAD_ROOT) ? full : null; // path traversal guard
-}
-
 function removeAttachmentFiles(attachments = []) {
   for (const a of attachments) {
-    const p = attachmentToDiskPath(a.url);
+    // works for relative urls and old absolute urls
+    const rel = (a.url || "").replace(/^https?:\/\/[^/]+/i, "");
+    if (!rel.startsWith("/uploads/chat/")) continue;
+    const full = path.join(CHAT_UPLOAD_ROOT, rel.slice("/uploads/chat/".length));
+    if (!full.startsWith(CHAT_UPLOAD_ROOT)) continue; // path traversal guard
     try {
-      if (p && fs.existsSync(p)) fs.unlinkSync(p);
+      if (fs.existsSync(full)) fs.unlinkSync(full);
     } catch (e) {
       console.error("attachment delete error:", e.message);
     }
   }
+}
+
+// Base URL from the incoming request:
+//   local  -> http://localhost:5000
+//   by IP  -> http://31.97.228.17:4477
+//   domain -> https://pmsbackend.pixelmindsolutions.com (needs nginx X-Forwarded-Proto)
+function getBaseUrl(req) {
+  const first = (v) => String(v || "").split(",")[0].trim();
+  const host = first(req.headers["x-forwarded-host"]) || first(req.get("host"));
+  if (!host) return process.env.BASE_URL || "";
+  const proto = first(req.headers["x-forwarded-proto"]) || req.protocol || "http";
+  return `${proto}://${host}`;
 }
 
 module.exports = {
@@ -123,5 +110,5 @@ module.exports = {
   buildAttachments,
   removeUploadedFiles,
   removeAttachmentFiles,
-  CHAT_UPLOAD_ROOT,
+  getBaseUrl,
 };

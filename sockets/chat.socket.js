@@ -7,6 +7,15 @@ const {
 } = require("../utils/resolveUser");
 const S = require("../services/chat.service");
 
+function socketBaseUrl(socket) {
+  const h = socket.handshake.headers || {};
+  const first = (v) => String(v || "").split(",")[0].trim();
+  const host = first(h["x-forwarded-host"]) || first(h.host);
+  if (!host) return process.env.BASE_URL || "";
+  const proto = first(h["x-forwarded-proto"]) || "http";
+  return `${proto}://${host}`;
+}
+
 function initializeChat(io) {
   const chatNs = io.of("/chat");
 
@@ -28,9 +37,10 @@ function initializeChat(io) {
   chatNs.on("connection", async (socket) => {
     const userId = String(socket.user._id);
     const userType = socket.userType;
+    const me = S.toRef(socket.user, userType);
     console.log(`💬 [chat] connected user=${userId} type=${userType}`);
 
-    // personal room + every chat I belong to (live messages without manual join)
+    // personal room + every chat I belong to
     socket.join(`user:${userId}`);
     try {
       const memberships = await ChatMember.find({
@@ -49,7 +59,7 @@ function initializeChat(io) {
       console.error("chat auto-join error:", err.message);
     }
 
-    // ---------- JOIN / LEAVE (optional, auto-join already done) ----------
+    // ---------- JOIN / LEAVE ----------
     socket.on("chat:join", async ({ chatId } = {}, ack) => {
       try {
         const m = await S.getApprovedMember(chatId, userId);
@@ -68,29 +78,28 @@ function initializeChat(io) {
     // ---------- SEND (text / emoji / sticker) ----------
     // Existing chat : { chatId, content, messageType?, replyTo? }
     // New 1-to-1    : { receiverId | employeeId, content, ... }
-    // Files go through the HTTP upload endpoints (500 MB is too big for sockets)
+    // Files go through the HTTP upload endpoints
     socket.on("chat:send", async (data = {}, ack) => {
       try {
         let chatId = data.chatId;
 
         if (!chatId && (data.receiverId || data.employeeId)) {
-          const target = await findParticipantByRef(
+          const found = await findParticipantByRef(
             data.receiverId || data.employeeId
           );
-          if (!target) return ack?.({ success: false, message: "Receiver not found" });
-          if (String(target._id) === userId)
+          if (!found) return ack?.({ success: false, message: "Receiver not found" });
+          const target = S.toRef(found);
+          if (String(target.id) === userId)
             return ack?.({ success: false, message: "Cannot message yourself" });
 
-          const { chat } = await S.getOrCreateDirectChat(
-            {
-              id: socket.user._id,
-              type: userType,
-              employeeId: socket.user.employeeId || null,
-            },
-            target
-          );
+          const { chat, created } = await S.getOrCreateDirectChat(me, target);
           chatId = String(chat._id);
-          S.joinRoom(chatNs, [userId, String(target._id)], chatId);
+          S.joinRoom(chatNs, [userId, String(target.id)], chatId);
+
+          if (created) {
+            const view = await S.getChatView(chatId, target.id, socketBaseUrl(socket));
+            S.notifyUsers(chatNs, [target.id], "chat:new", view);
+          }
         }
 
         const m = await S.getApprovedMember(chatId, userId);
@@ -98,11 +107,11 @@ function initializeChat(io) {
 
         const payload = await S.saveMessage({
           chatId,
-          senderId: socket.user._id,
-          senderType: userType,
+          sender: me,
           content: data.content,
           messageType: data.messageType,
           replyTo: data.replyTo,
+          baseUrl: socketBaseUrl(socket),
         });
 
         chatNs.to(`chat:${chatId}`).emit("chat:message", payload);

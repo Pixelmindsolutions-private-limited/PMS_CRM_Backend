@@ -33,8 +33,9 @@ const chatSchema = new Schema(
   {
     type: { type: String, enum: ["direct", "group"], required: true },
     name: { type: String, trim: true, default: "" },
+    description: { type: String, trim: true, default: "" },
     // "<smallerId>_<biggerId>" — only for direct chats (prevents duplicates)
-    directKey: { type: String, index: true, sparse: true, unique: true },
+    directKey: { type: String, unique: true, sparse: true },
     createdBy: { type: Schema.Types.ObjectId, required: true },
     creatorType: { type: String, enum: ACCOUNT_TYPES, required: true },
     lastMessage: {
@@ -70,7 +71,6 @@ const chatMessageSchema = new Schema(
     chat: { type: Schema.Types.ObjectId, ref: "Chat", required: true },
     sender: { type: Schema.Types.ObjectId, required: true },
     senderType: { type: String, enum: ACCOUNT_TYPES, required: true },
-    // text / emoji (unicode) / sticker id or url. Can be empty if files exist.
     content: { type: String, trim: true, default: "" },
     messageType: {
       type: String,
@@ -80,6 +80,8 @@ const chatMessageSchema = new Schema(
     attachments: { type: [attachmentSchema], default: [] },
     replyTo: { type: Schema.Types.ObjectId, ref: "ChatMessage", default: null },
     readBy: [{ type: Schema.Types.ObjectId }],
+    isEdited: { type: Boolean, default: false },
+    editedAt: { type: Date, default: null },
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null },
   },
@@ -89,6 +91,8 @@ const chatMessageSchema = new Schema(
 chatMessageSchema.index({ chat: 1, createdAt: -1 });
 
 chatMessageSchema.pre("validate", function (next) {
+  // deleted messages are intentionally empty
+  if (this.isDeleted) return next();
   if (!this.content && (!this.attachments || this.attachments.length === 0)) {
     return next(new Error("Message needs text or at least one file"));
   }
