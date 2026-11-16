@@ -384,8 +384,9 @@ exports.createDelayRequests = async (req, res) => {
         duplicates,
       });
     }
+    
 
-    const created = [];
+    const created = []; 
     for (const p of prepared) {
       created.push(await createWithNumber(p));
     }
