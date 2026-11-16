@@ -19,10 +19,10 @@
 
 //     // Verify token
 //     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'mysecretkey');
-    
+
 //     // Get user
 //     req.user = await Admin.findById(decoded.id).select('-password');
-    
+
 //     next();
 //   } catch (error) {
 //     res.status(401).json({
@@ -55,7 +55,19 @@ const protect = async (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'mysecretkey');
+    // const decoded = jwt.verify(token, process.env.JWT_SECRET || 'mysecretkey');
+    const secrets = [process.env.JWT_SECRET, process.env.JWT_SECRET_OLD].filter(Boolean);
+    let decoded;
+    let lastErr;
+    for (const s of secrets) {
+      try {
+        decoded = jwt.verify(token, s);
+        break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (!decoded) throw lastErr;
     const userId = decoded.id || decoded.adminId;
     const userType = decoded.type || (decoded.adminId ? 'admin' : undefined);
 
