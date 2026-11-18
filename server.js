@@ -385,6 +385,7 @@ const allowedOrigins = [
   "https://pmsadmin.pixelmindsolutions.com",
   "http://16.178.180.174:3000",
   "http://13.211.179.187:3001",
+  "https://crmstaff.pixelmindsolutions.com"
 ];
 
 // ==================== SOCKET.IO ====================
@@ -392,8 +393,8 @@ const io = new Server(httpServer, {
   cors: {
     origin: allowedOrigins,
     credentials: true,
-    methods: ["GET", "POST"],
-  },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+  }, 
   maxHttpBufferSize: 100 * 1024,
   pingInterval: 25000,
   pingTimeout: 20000,
